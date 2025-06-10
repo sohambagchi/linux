@@ -38,6 +38,7 @@ static inline struct tpd12s015_device *to_tpd12s015(struct drm_bridge *bridge)
 }
 
 static int tpd12s015_attach(struct drm_bridge *bridge,
+			    struct drm_encoder *encoder,
 			    enum drm_bridge_attach_flags flags)
 {
 	struct tpd12s015_device *tpd = to_tpd12s015(bridge);
@@ -46,7 +47,7 @@ static int tpd12s015_attach(struct drm_bridge *bridge,
 	if (!(flags & DRM_BRIDGE_ATTACH_NO_CONNECTOR))
 		return -EINVAL;
 
-	ret = drm_bridge_attach(bridge->encoder, tpd->next_bridge,
+	ret = drm_bridge_attach(encoder, tpd->next_bridge,
 				bridge, flags);
 	if (ret < 0)
 		return ret;
@@ -179,13 +180,11 @@ static int tpd12s015_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int __exit tpd12s015_remove(struct platform_device *pdev)
+static void tpd12s015_remove(struct platform_device *pdev)
 {
 	struct tpd12s015_device *tpd = platform_get_drvdata(pdev);
 
 	drm_bridge_remove(&tpd->bridge);
-
-	return 0;
 }
 
 static const struct of_device_id tpd12s015_of_match[] = {
@@ -197,7 +196,7 @@ MODULE_DEVICE_TABLE(of, tpd12s015_of_match);
 
 static struct platform_driver tpd12s015_driver = {
 	.probe	= tpd12s015_probe,
-	.remove	= __exit_p(tpd12s015_remove),
+	.remove = tpd12s015_remove,
 	.driver	= {
 		.name	= "tpd12s015",
 		.of_match_table = tpd12s015_of_match,

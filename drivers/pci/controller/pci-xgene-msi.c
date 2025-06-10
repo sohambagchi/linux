@@ -8,10 +8,11 @@
  */
 #include <linux/cpu.h>
 #include <linux/interrupt.h>
+#include <linux/irqdomain.h>
 #include <linux/module.h>
 #include <linux/msi.h>
-#include <linux/of_irq.h>
 #include <linux/irqchip/chained_irq.h>
+#include <linux/irqchip/irq-msi-lib.h>
 #include <linux/pci.h>
 #include <linux/platform_device.h>
 #include <linux/of_pci.h>
@@ -32,7 +33,6 @@ struct xgene_msi_group {
 struct xgene_msi {
 	struct device_node	*node;
 	struct irq_domain	*inner_domain;
-	struct irq_domain	*msi_domain;
 	u64			msi_addr;
 	void __iomem		*msi_regs;
 	unsigned long		*bitmap;
@@ -43,20 +43,6 @@ struct xgene_msi {
 
 /* Global data */
 static struct xgene_msi xgene_msi_ctrl;
-
-static struct irq_chip xgene_msi_top_irq_chip = {
-	.name		= "X-Gene1 MSI",
-	.irq_enable	= pci_msi_unmask_irq,
-	.irq_disable	= pci_msi_mask_irq,
-	.irq_mask	= pci_msi_mask_irq,
-	.irq_unmask	= pci_msi_unmask_irq,
-};
-
-static struct  msi_domain_info xgene_msi_domain_info = {
-	.flags	= (MSI_FLAG_USE_DEF_DOM_OPS | MSI_FLAG_USE_DEF_CHIP_OPS |
-		  MSI_FLAG_PCI_MSIX),
-	.chip	= &xgene_msi_top_irq_chip,
-};
 
 /*
  * X-Gene v1 has 16 groups of MSI termination registers MSInIRx, where
@@ -154,7 +140,7 @@ static void xgene_compose_msi_msg(struct irq_data *data, struct msi_msg *msg)
  * X-Gene v1 only has 16 MSI GIC IRQs for 2048 MSI vectors.  To maintain
  * the expected behaviour of .set_affinity for each MSI interrupt, the 16
  * MSI GIC IRQs are statically allocated to 8 X-Gene v1 cores (2 GIC IRQs
- * for each core).  The MSI vector is moved fom 1 MSI GIC IRQ to another
+ * for each core).  The MSI vector is moved from 1 MSI GIC IRQ to another
  * MSI GIC IRQ to steer its MSI interrupt to correct X-Gene v1 core.  As a
  * consequence, the total MSI vectors that X-Gene v1 supports will be
  * reduced to 256 (2048/8) vectors.
@@ -235,34 +221,35 @@ static void xgene_irq_domain_free(struct irq_domain *domain,
 	irq_domain_free_irqs_parent(domain, virq, nr_irqs);
 }
 
-static const struct irq_domain_ops msi_domain_ops = {
+static const struct irq_domain_ops xgene_msi_domain_ops = {
 	.alloc  = xgene_irq_domain_alloc,
 	.free   = xgene_irq_domain_free,
 };
 
+static const struct msi_parent_ops xgene_msi_parent_ops = {
+	.supported_flags	= (MSI_GENERIC_FLAGS_MASK	|
+				   MSI_FLAG_PCI_MSIX),
+	.required_flags		= (MSI_FLAG_USE_DEF_DOM_OPS	|
+				   MSI_FLAG_USE_DEF_CHIP_OPS),
+	.bus_select_token	= DOMAIN_BUS_PCI_MSI,
+	.init_dev_msi_info	= msi_lib_init_dev_msi_info,
+};
+
 static int xgene_allocate_domains(struct xgene_msi *msi)
 {
-	msi->inner_domain = irq_domain_add_linear(NULL, NR_MSI_VEC,
-						  &msi_domain_ops, msi);
-	if (!msi->inner_domain)
-		return -ENOMEM;
+	struct irq_domain_info info = {
+		.fwnode		= of_fwnode_handle(msi->node),
+		.ops		= &xgene_msi_domain_ops,
+		.size		= NR_MSI_VEC,
+		.host_data	= msi,
+	};
 
-	msi->msi_domain = pci_msi_create_irq_domain(of_node_to_fwnode(msi->node),
-						    &xgene_msi_domain_info,
-						    msi->inner_domain);
-
-	if (!msi->msi_domain) {
-		irq_domain_remove(msi->inner_domain);
-		return -ENOMEM;
-	}
-
-	return 0;
+	msi->inner_domain = msi_create_parent_irq_domain(&info, &xgene_msi_parent_ops);
+	return msi->inner_domain ? 0 : -ENOMEM;
 }
 
 static void xgene_free_domains(struct xgene_msi *msi)
 {
-	if (msi->msi_domain)
-		irq_domain_remove(msi->msi_domain);
 	if (msi->inner_domain)
 		irq_domain_remove(msi->inner_domain);
 }
@@ -348,7 +335,7 @@ static void xgene_msi_isr(struct irq_desc *desc)
 
 static enum cpuhp_state pci_xgene_online;
 
-static int xgene_msi_remove(struct platform_device *pdev)
+static void xgene_msi_remove(struct platform_device *pdev)
 {
 	struct xgene_msi *msi = platform_get_drvdata(pdev);
 
@@ -362,8 +349,6 @@ static int xgene_msi_remove(struct platform_device *pdev)
 	msi->bitmap = NULL;
 
 	xgene_free_domains(msi);
-
-	return 0;
 }
 
 static int xgene_msi_hwirq_alloc(unsigned int cpu)
@@ -443,8 +428,7 @@ static int xgene_msi_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, xgene_msi);
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	xgene_msi->msi_regs = devm_ioremap_resource(&pdev->dev, res);
+	xgene_msi->msi_regs = devm_platform_get_and_ioremap_resource(pdev, 0, &res);
 	if (IS_ERR(xgene_msi->msi_regs)) {
 		rc = PTR_ERR(xgene_msi->msi_regs);
 		goto error;

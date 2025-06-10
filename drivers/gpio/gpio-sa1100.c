@@ -12,6 +12,7 @@
 #include <soc/sa1100/pwer.h>
 #include <mach/hardware.h>
 #include <mach/irqs.h>
+#include <mach/generic.h>
 
 struct sa1100_gpio_chip {
 	struct gpio_chip chip;
@@ -318,7 +319,7 @@ void __init sa1100_init_gpio(void)
 
 	gpiochip_add_data(&sa1100_gpio_chip.chip, NULL);
 
-	sa1100_gpio_irqdomain = irq_domain_add_simple(NULL,
+	sa1100_gpio_irqdomain = irq_domain_create_simple(NULL,
 			28, IRQ_GPIO0,
 			&sa1100_gpio_irqdomain_ops, sgc);
 

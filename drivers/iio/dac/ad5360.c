@@ -79,13 +79,13 @@ struct ad5360_state {
 	struct mutex			lock;
 
 	/*
-	 * DMA (thus cache coherency maintenance) requires the
+	 * DMA (thus cache coherency maintenance) may require the
 	 * transfer buffers to live in their own cache lines.
 	 */
 	union {
 		__be32 d32;
 		u8 d8[4];
-	} data[2] ____cacheline_aligned;
+	} data[2] __aligned(IIO_DMA_MINALIGN);
 };
 
 enum ad5360_type {
@@ -542,7 +542,7 @@ static const struct spi_device_id ad5360_ids[] = {
 	{ "ad5371", ID_AD5371 },
 	{ "ad5372", ID_AD5372 },
 	{ "ad5373", ID_AD5373 },
-	{}
+	{ }
 };
 MODULE_DEVICE_TABLE(spi, ad5360_ids);
 

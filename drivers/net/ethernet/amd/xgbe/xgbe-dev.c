@@ -1,117 +1,8 @@
+// SPDX-License-Identifier: (GPL-2.0-or-later OR BSD-3-Clause)
 /*
- * AMD 10Gb Ethernet driver
- *
- * This file is available to you under your choice of the following two
- * licenses:
- *
- * License 1: GPLv2
- *
- * Copyright (c) 2014-2016 Advanced Micro Devices, Inc.
- *
- * This file is free software; you may copy, redistribute and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 2 of the License, or (at
- * your option) any later version.
- *
- * This file is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- *
- * This file incorporates work covered by the following copyright and
- * permission notice:
- *     The Synopsys DWC ETHER XGMAC Software Driver and documentation
- *     (hereinafter "Software") is an unsupported proprietary work of Synopsys,
- *     Inc. unless otherwise expressly agreed to in writing between Synopsys
- *     and you.
- *
- *     The Software IS NOT an item of Licensed Software or Licensed Product
- *     under any End User Software License Agreement or Agreement for Licensed
- *     Product with Synopsys or any supplement thereto.  Permission is hereby
- *     granted, free of charge, to any person obtaining a copy of this software
- *     annotated with this license and the Software, to deal in the Software
- *     without restriction, including without limitation the rights to use,
- *     copy, modify, merge, publish, distribute, sublicense, and/or sell copies
- *     of the Software, and to permit persons to whom the Software is furnished
- *     to do so, subject to the following conditions:
- *
- *     The above copyright notice and this permission notice shall be included
- *     in all copies or substantial portions of the Software.
- *
- *     THIS SOFTWARE IS BEING DISTRIBUTED BY SYNOPSYS SOLELY ON AN "AS IS"
- *     BASIS AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
- *     TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
- *     PARTICULAR PURPOSE ARE HEREBY DISCLAIMED. IN NO EVENT SHALL SYNOPSYS
- *     BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- *     CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- *     SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- *     INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- *     CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- *     ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
- *     THE POSSIBILITY OF SUCH DAMAGE.
- *
- *
- * License 2: Modified BSD
- *
- * Copyright (c) 2014-2016 Advanced Micro Devices, Inc.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in the
- *       documentation and/or other materials provided with the distribution.
- *     * Neither the name of Advanced Micro Devices, Inc. nor the
- *       names of its contributors may be used to endorse or promote products
- *       derived from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT HOLDER> BE LIABLE FOR ANY
- * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
- * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- * This file incorporates work covered by the following copyright and
- * permission notice:
- *     The Synopsys DWC ETHER XGMAC Software Driver and documentation
- *     (hereinafter "Software") is an unsupported proprietary work of Synopsys,
- *     Inc. unless otherwise expressly agreed to in writing between Synopsys
- *     and you.
- *
- *     The Software IS NOT an item of Licensed Software or Licensed Product
- *     under any End User Software License Agreement or Agreement for Licensed
- *     Product with Synopsys or any supplement thereto.  Permission is hereby
- *     granted, free of charge, to any person obtaining a copy of this software
- *     annotated with this license and the Software, to deal in the Software
- *     without restriction, including without limitation the rights to use,
- *     copy, modify, merge, publish, distribute, sublicense, and/or sell copies
- *     of the Software, and to permit persons to whom the Software is furnished
- *     to do so, subject to the following conditions:
- *
- *     The above copyright notice and this permission notice shall be included
- *     in all copies or substantial portions of the Software.
- *
- *     THIS SOFTWARE IS BEING DISTRIBUTED BY SYNOPSYS SOLELY ON AN "AS IS"
- *     BASIS AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
- *     TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
- *     PARTICULAR PURPOSE ARE HEREBY DISCLAIMED. IN NO EVENT SHALL SYNOPSYS
- *     BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- *     CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- *     SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- *     INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- *     CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- *     ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
- *     THE POSSIBILITY OF SUCH DAMAGE.
+ * Copyright (c) 2014-2025, Advanced Micro Devices, Inc.
+ * Copyright (c) 2014, Synopsys, Inc.
+ * All rights reserved
  */
 
 #include <linux/phy.h>
@@ -120,9 +11,11 @@
 #include <linux/bitrev.h>
 #include <linux/crc32.h>
 #include <linux/crc32poly.h>
+#include <linux/pci.h>
 
 #include "xgbe.h"
 #include "xgbe-common.h"
+#include "xgbe-smn.h"
 
 static inline unsigned int xgbe_get_max_frame(struct xgbe_prv_data *pdata)
 {
@@ -318,6 +211,18 @@ static void xgbe_config_sph_mode(struct xgbe_prv_data *pdata)
 	}
 
 	XGMAC_IOWRITE_BITS(pdata, MAC_RCR, HDSMS, XGBE_SPH_HDSMS_SIZE);
+}
+
+static void xgbe_disable_sph_mode(struct xgbe_prv_data *pdata)
+{
+	unsigned int i;
+
+	for (i = 0; i < pdata->channel_count; i++) {
+		if (!pdata->channel[i]->rx_ring)
+			break;
+
+		XGMAC_DMA_IOWRITE_BITS(pdata->channel[i], DMA_CH_CR, SPH, 0);
+	}
 }
 
 static int xgbe_write_rss_reg(struct xgbe_prv_data *pdata, unsigned int type,
@@ -524,19 +429,28 @@ static void xgbe_disable_vxlan(struct xgbe_prv_data *pdata)
 	netif_dbg(pdata, drv, pdata->netdev, "VXLAN acceleration disabled\n");
 }
 
+static unsigned int xgbe_get_fc_queue_count(struct xgbe_prv_data *pdata)
+{
+	unsigned int max_q_count = XGMAC_MAX_FLOW_CONTROL_QUEUES;
+
+	/* From MAC ver 30H the TFCR is per priority, instead of per queue */
+	if (XGMAC_GET_BITS(pdata->hw_feat.version, MAC_VR, SNPSVER) >= 0x30)
+		return max_q_count;
+	else
+		return min_t(unsigned int, pdata->tx_q_count, max_q_count);
+}
+
 static int xgbe_disable_tx_flow_control(struct xgbe_prv_data *pdata)
 {
-	unsigned int max_q_count, q_count;
 	unsigned int reg, reg_val;
-	unsigned int i;
+	unsigned int i, q_count;
 
 	/* Clear MTL flow control */
 	for (i = 0; i < pdata->rx_q_count; i++)
 		XGMAC_MTL_IOWRITE_BITS(pdata, i, MTL_Q_RQOMR, EHFC, 0);
 
 	/* Clear MAC flow control */
-	max_q_count = XGMAC_MAX_FLOW_CONTROL_QUEUES;
-	q_count = min_t(unsigned int, pdata->tx_q_count, max_q_count);
+	q_count = xgbe_get_fc_queue_count(pdata);
 	reg = MAC_Q0TFCR;
 	for (i = 0; i < q_count; i++) {
 		reg_val = XGMAC_IOREAD(pdata, reg);
@@ -553,9 +467,8 @@ static int xgbe_enable_tx_flow_control(struct xgbe_prv_data *pdata)
 {
 	struct ieee_pfc *pfc = pdata->pfc;
 	struct ieee_ets *ets = pdata->ets;
-	unsigned int max_q_count, q_count;
 	unsigned int reg, reg_val;
-	unsigned int i;
+	unsigned int i, q_count;
 
 	/* Set MTL flow control */
 	for (i = 0; i < pdata->rx_q_count; i++) {
@@ -579,8 +492,7 @@ static int xgbe_enable_tx_flow_control(struct xgbe_prv_data *pdata)
 	}
 
 	/* Set MAC flow control */
-	max_q_count = XGMAC_MAX_FLOW_CONTROL_QUEUES;
-	q_count = min_t(unsigned int, pdata->tx_q_count, max_q_count);
+	q_count = xgbe_get_fc_queue_count(pdata);
 	reg = MAC_Q0TFCR;
 	for (i = 0; i < q_count; i++) {
 		reg_val = XGMAC_IOREAD(pdata, reg);
@@ -807,6 +719,9 @@ static int xgbe_set_speed(struct xgbe_prv_data *pdata, int speed)
 	unsigned int ss;
 
 	switch (speed) {
+	case SPEED_10:
+		ss = 0x07;
+		break;
 	case SPEED_1000:
 		ss = 0x03;
 		break;
@@ -1140,18 +1055,19 @@ static int xgbe_set_gpio(struct xgbe_prv_data *pdata, unsigned int gpio)
 	return 0;
 }
 
-static int xgbe_read_mmd_regs_v2(struct xgbe_prv_data *pdata, int prtad,
-				 int mmd_reg)
+static unsigned int xgbe_get_mmd_address(struct xgbe_prv_data *pdata,
+					 int mmd_reg)
 {
-	unsigned long flags;
-	unsigned int mmd_address, index, offset;
-	int mmd_data;
+	return (mmd_reg & XGBE_ADDR_C45) ?
+		mmd_reg & ~XGBE_ADDR_C45 :
+		(pdata->mdio_mmd << 16) | (mmd_reg & 0xffff);
+}
 
-	if (mmd_reg & MII_ADDR_C45)
-		mmd_address = mmd_reg & ~MII_ADDR_C45;
-	else
-		mmd_address = (pdata->mdio_mmd << 16) | (mmd_reg & 0xffff);
-
+static void xgbe_get_pcs_index_and_offset(struct xgbe_prv_data *pdata,
+					  unsigned int mmd_address,
+					  unsigned int *index,
+					  unsigned int *offset)
+{
 	/* The PCS registers are accessed using mmio. The underlying
 	 * management interface uses indirect addressing to access the MMD
 	 * register sets. This requires accessing of the PCS register in two
@@ -1162,8 +1078,98 @@ static int xgbe_read_mmd_regs_v2(struct xgbe_prv_data *pdata, int prtad,
 	 * offset 1 bit and reading 16 bits of data.
 	 */
 	mmd_address <<= 1;
-	index = mmd_address & ~pdata->xpcs_window_mask;
-	offset = pdata->xpcs_window + (mmd_address & pdata->xpcs_window_mask);
+	*index = mmd_address & ~pdata->xpcs_window_mask;
+	*offset = pdata->xpcs_window + (mmd_address & pdata->xpcs_window_mask);
+}
+
+static int xgbe_read_mmd_regs_v3(struct xgbe_prv_data *pdata, int prtad,
+				 int mmd_reg)
+{
+	unsigned int mmd_address, index, offset;
+	u32 smn_address;
+	int mmd_data;
+	int ret;
+
+	mmd_address = xgbe_get_mmd_address(pdata, mmd_reg);
+
+	xgbe_get_pcs_index_and_offset(pdata, mmd_address, &index, &offset);
+
+	smn_address = pdata->smn_base + pdata->xpcs_window_sel_reg;
+	ret = amd_smn_write(0, smn_address, index);
+	if (ret)
+		return ret;
+
+	ret = amd_smn_read(0, pdata->smn_base + offset, &mmd_data);
+	if (ret)
+		return ret;
+
+	mmd_data = (offset % 4) ? FIELD_GET(XGBE_GEN_HI_MASK, mmd_data) :
+				  FIELD_GET(XGBE_GEN_LO_MASK, mmd_data);
+
+	return mmd_data;
+}
+
+static void xgbe_write_mmd_regs_v3(struct xgbe_prv_data *pdata, int prtad,
+				   int mmd_reg, int mmd_data)
+{
+	unsigned int pci_mmd_data, hi_mask, lo_mask;
+	unsigned int mmd_address, index, offset;
+	struct pci_dev *dev;
+	u32 smn_address;
+	int ret;
+
+	dev = pdata->pcidev;
+	mmd_address = xgbe_get_mmd_address(pdata, mmd_reg);
+
+	xgbe_get_pcs_index_and_offset(pdata, mmd_address, &index, &offset);
+
+	smn_address = pdata->smn_base + pdata->xpcs_window_sel_reg;
+	ret = amd_smn_write(0, smn_address, index);
+	if (ret) {
+		pci_err(dev, "Failed to write data 0x%x\n", index);
+		return;
+	}
+
+	ret = amd_smn_read(0, pdata->smn_base + offset, &pci_mmd_data);
+	if (ret) {
+		pci_err(dev, "Failed to read data\n");
+		return;
+	}
+
+	if (offset % 4) {
+		hi_mask = FIELD_PREP(XGBE_GEN_HI_MASK, mmd_data);
+		lo_mask = FIELD_GET(XGBE_GEN_LO_MASK, pci_mmd_data);
+	} else {
+		hi_mask = FIELD_PREP(XGBE_GEN_HI_MASK,
+				     FIELD_GET(XGBE_GEN_HI_MASK, pci_mmd_data));
+		lo_mask = FIELD_GET(XGBE_GEN_LO_MASK, mmd_data);
+	}
+
+	pci_mmd_data = hi_mask | lo_mask;
+
+	ret = amd_smn_write(0, smn_address, index);
+	if (ret) {
+		pci_err(dev, "Failed to write data 0x%x\n", index);
+		return;
+	}
+
+	ret = amd_smn_write(0, (pdata->smn_base + offset), pci_mmd_data);
+	if (ret) {
+		pci_err(dev, "Failed to write data 0x%x\n", pci_mmd_data);
+		return;
+	}
+}
+
+static int xgbe_read_mmd_regs_v2(struct xgbe_prv_data *pdata, int prtad,
+				 int mmd_reg)
+{
+	unsigned int mmd_address, index, offset;
+	unsigned long flags;
+	int mmd_data;
+
+	mmd_address = xgbe_get_mmd_address(pdata, mmd_reg);
+
+	xgbe_get_pcs_index_and_offset(pdata, mmd_address, &index, &offset);
 
 	spin_lock_irqsave(&pdata->xpcs_lock, flags);
 	XPCS32_IOWRITE(pdata, pdata->xpcs_window_sel_reg, index);
@@ -1179,23 +1185,9 @@ static void xgbe_write_mmd_regs_v2(struct xgbe_prv_data *pdata, int prtad,
 	unsigned long flags;
 	unsigned int mmd_address, index, offset;
 
-	if (mmd_reg & MII_ADDR_C45)
-		mmd_address = mmd_reg & ~MII_ADDR_C45;
-	else
-		mmd_address = (pdata->mdio_mmd << 16) | (mmd_reg & 0xffff);
+	mmd_address = xgbe_get_mmd_address(pdata, mmd_reg);
 
-	/* The PCS registers are accessed using mmio. The underlying
-	 * management interface uses indirect addressing to access the MMD
-	 * register sets. This requires accessing of the PCS register in two
-	 * phases, an address phase and a data phase.
-	 *
-	 * The mmio interface is based on 16-bit offsets and values. All
-	 * register offsets must therefore be adjusted by left shifting the
-	 * offset 1 bit and writing 16 bits of data.
-	 */
-	mmd_address <<= 1;
-	index = mmd_address & ~pdata->xpcs_window_mask;
-	offset = pdata->xpcs_window + (mmd_address & pdata->xpcs_window_mask);
+	xgbe_get_pcs_index_and_offset(pdata, mmd_address, &index, &offset);
 
 	spin_lock_irqsave(&pdata->xpcs_lock, flags);
 	XPCS32_IOWRITE(pdata, pdata->xpcs_window_sel_reg, index);
@@ -1210,10 +1202,7 @@ static int xgbe_read_mmd_regs_v1(struct xgbe_prv_data *pdata, int prtad,
 	unsigned int mmd_address;
 	int mmd_data;
 
-	if (mmd_reg & MII_ADDR_C45)
-		mmd_address = mmd_reg & ~MII_ADDR_C45;
-	else
-		mmd_address = (pdata->mdio_mmd << 16) | (mmd_reg & 0xffff);
+	mmd_address = xgbe_get_mmd_address(pdata, mmd_reg);
 
 	/* The PCS registers are accessed using mmio. The underlying APB3
 	 * management interface uses indirect addressing to access the MMD
@@ -1238,10 +1227,7 @@ static void xgbe_write_mmd_regs_v1(struct xgbe_prv_data *pdata, int prtad,
 	unsigned int mmd_address;
 	unsigned long flags;
 
-	if (mmd_reg & MII_ADDR_C45)
-		mmd_address = mmd_reg & ~MII_ADDR_C45;
-	else
-		mmd_address = (pdata->mdio_mmd << 16) | (mmd_reg & 0xffff);
+	mmd_address = xgbe_get_mmd_address(pdata, mmd_reg);
 
 	/* The PCS registers are accessed using mmio. The underlying APB3
 	 * management interface uses indirect addressing to access the MMD
@@ -1268,6 +1254,9 @@ static int xgbe_read_mmd_regs(struct xgbe_prv_data *pdata, int prtad,
 	case XGBE_XPCS_ACCESS_V2:
 	default:
 		return xgbe_read_mmd_regs_v2(pdata, prtad, mmd_reg);
+
+	case XGBE_XPCS_ACCESS_V3:
+		return xgbe_read_mmd_regs_v3(pdata, prtad, mmd_reg);
 	}
 }
 
@@ -1278,17 +1267,29 @@ static void xgbe_write_mmd_regs(struct xgbe_prv_data *pdata, int prtad,
 	case XGBE_XPCS_ACCESS_V1:
 		return xgbe_write_mmd_regs_v1(pdata, prtad, mmd_reg, mmd_data);
 
+	case XGBE_XPCS_ACCESS_V3:
+		return xgbe_write_mmd_regs_v3(pdata, prtad, mmd_reg, mmd_data);
+
 	case XGBE_XPCS_ACCESS_V2:
 	default:
 		return xgbe_write_mmd_regs_v2(pdata, prtad, mmd_reg, mmd_data);
 	}
 }
 
-static unsigned int xgbe_create_mdio_sca(int port, int reg)
+static unsigned int xgbe_create_mdio_sca_c22(int port, int reg)
 {
-	unsigned int mdio_sca, da;
+	unsigned int mdio_sca;
 
-	da = (reg & MII_ADDR_C45) ? reg >> 16 : 0;
+	mdio_sca = 0;
+	XGMAC_SET_BITS(mdio_sca, MAC_MDIOSCAR, RA, reg);
+	XGMAC_SET_BITS(mdio_sca, MAC_MDIOSCAR, PA, port);
+
+	return mdio_sca;
+}
+
+static unsigned int xgbe_create_mdio_sca_c45(int port, unsigned int da, int reg)
+{
+	unsigned int mdio_sca;
 
 	mdio_sca = 0;
 	XGMAC_SET_BITS(mdio_sca, MAC_MDIOSCAR, RA, reg);
@@ -1298,14 +1299,13 @@ static unsigned int xgbe_create_mdio_sca(int port, int reg)
 	return mdio_sca;
 }
 
-static int xgbe_write_ext_mii_regs(struct xgbe_prv_data *pdata, int addr,
-				   int reg, u16 val)
+static int xgbe_write_ext_mii_regs(struct xgbe_prv_data *pdata,
+				   unsigned int mdio_sca, u16 val)
 {
-	unsigned int mdio_sca, mdio_sccd;
+	unsigned int mdio_sccd;
 
 	reinit_completion(&pdata->mdio_complete);
 
-	mdio_sca = xgbe_create_mdio_sca(addr, reg);
 	XGMAC_IOWRITE(pdata, MAC_MDIOSCAR, mdio_sca);
 
 	mdio_sccd = 0;
@@ -1322,14 +1322,33 @@ static int xgbe_write_ext_mii_regs(struct xgbe_prv_data *pdata, int addr,
 	return 0;
 }
 
-static int xgbe_read_ext_mii_regs(struct xgbe_prv_data *pdata, int addr,
-				  int reg)
+static int xgbe_write_ext_mii_regs_c22(struct xgbe_prv_data *pdata, int addr,
+				       int reg, u16 val)
 {
-	unsigned int mdio_sca, mdio_sccd;
+	unsigned int mdio_sca;
+
+	mdio_sca = xgbe_create_mdio_sca_c22(addr, reg);
+
+	return xgbe_write_ext_mii_regs(pdata, mdio_sca, val);
+}
+
+static int xgbe_write_ext_mii_regs_c45(struct xgbe_prv_data *pdata, int addr,
+				       int devad, int reg, u16 val)
+{
+	unsigned int mdio_sca;
+
+	mdio_sca = xgbe_create_mdio_sca_c45(addr, devad, reg);
+
+	return xgbe_write_ext_mii_regs(pdata, mdio_sca, val);
+}
+
+static int xgbe_read_ext_mii_regs(struct xgbe_prv_data *pdata,
+				  unsigned int mdio_sca)
+{
+	unsigned int mdio_sccd;
 
 	reinit_completion(&pdata->mdio_complete);
 
-	mdio_sca = xgbe_create_mdio_sca(addr, reg);
 	XGMAC_IOWRITE(pdata, MAC_MDIOSCAR, mdio_sca);
 
 	mdio_sccd = 0;
@@ -1343,6 +1362,26 @@ static int xgbe_read_ext_mii_regs(struct xgbe_prv_data *pdata, int addr,
 	}
 
 	return XGMAC_IOREAD_BITS(pdata, MAC_MDIOSCCDR, DATA);
+}
+
+static int xgbe_read_ext_mii_regs_c22(struct xgbe_prv_data *pdata, int addr,
+				      int reg)
+{
+	unsigned int mdio_sca;
+
+	mdio_sca = xgbe_create_mdio_sca_c22(addr, reg);
+
+	return xgbe_read_ext_mii_regs(pdata, mdio_sca);
+}
+
+static int xgbe_read_ext_mii_regs_c45(struct xgbe_prv_data *pdata, int addr,
+				      int devad, int reg)
+{
+	unsigned int mdio_sca;
+
+	mdio_sca = xgbe_create_mdio_sca_c45(addr, devad, reg);
+
+	return xgbe_read_ext_mii_regs(pdata, mdio_sca);
 }
 
 static int xgbe_set_ext_mii_mode(struct xgbe_prv_data *pdata, unsigned int port,
@@ -3488,8 +3527,12 @@ static int xgbe_init(struct xgbe_prv_data *pdata)
 	xgbe_config_tx_coalesce(pdata);
 	xgbe_config_rx_buffer_size(pdata);
 	xgbe_config_tso_mode(pdata);
-	xgbe_config_sph_mode(pdata);
-	xgbe_config_rss(pdata);
+
+	if (pdata->netdev->features & NETIF_F_RXCSUM) {
+		xgbe_config_sph_mode(pdata);
+		xgbe_config_rss(pdata);
+	}
+
 	desc_if->wrapper_tx_desc_init(pdata);
 	desc_if->wrapper_rx_desc_init(pdata);
 	xgbe_enable_dma_interrupts(pdata);
@@ -3558,8 +3601,10 @@ void xgbe_init_function_ptrs_dev(struct xgbe_hw_if *hw_if)
 	hw_if->set_speed = xgbe_set_speed;
 
 	hw_if->set_ext_mii_mode = xgbe_set_ext_mii_mode;
-	hw_if->read_ext_mii_regs = xgbe_read_ext_mii_regs;
-	hw_if->write_ext_mii_regs = xgbe_write_ext_mii_regs;
+	hw_if->read_ext_mii_regs_c22 = xgbe_read_ext_mii_regs_c22;
+	hw_if->write_ext_mii_regs_c22 = xgbe_write_ext_mii_regs_c22;
+	hw_if->read_ext_mii_regs_c45 = xgbe_read_ext_mii_regs_c45;
+	hw_if->write_ext_mii_regs_c45 = xgbe_write_ext_mii_regs_c45;
 
 	hw_if->set_gpio = xgbe_set_gpio;
 	hw_if->clr_gpio = xgbe_clr_gpio;
@@ -3642,6 +3687,10 @@ void xgbe_init_function_ptrs_dev(struct xgbe_hw_if *hw_if)
 	hw_if->enable_vxlan = xgbe_enable_vxlan;
 	hw_if->disable_vxlan = xgbe_disable_vxlan;
 	hw_if->set_vxlan_id = xgbe_set_vxlan_id;
+
+	/* For Split Header*/
+	hw_if->enable_sph = xgbe_config_sph_mode;
+	hw_if->disable_sph = xgbe_disable_sph_mode;
 
 	DBGPR("<--xgbe_init_function_ptrs\n");
 }

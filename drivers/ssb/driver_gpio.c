@@ -132,7 +132,8 @@ static irqreturn_t ssb_gpio_irq_chipco_handler(int irq, void *dev_id)
 		return IRQ_NONE;
 
 	for_each_set_bit(gpio, &irqs, bus->gpio.ngpio)
-		generic_handle_irq(ssb_gpio_to_irq(&bus->gpio, gpio));
+		generic_handle_domain_irq_safe(bus->irq_domain, gpio);
+
 	ssb_chipco_gpio_polarity(chipco, irqs, val & irqs);
 
 	return IRQ_HANDLED;
@@ -147,8 +148,8 @@ static int ssb_gpio_irq_chipco_domain_init(struct ssb_bus *bus)
 	if (bus->bustype != SSB_BUSTYPE_SSB)
 		return 0;
 
-	bus->irq_domain = irq_domain_add_linear(NULL, chip->ngpio,
-						&irq_domain_simple_ops, chipco);
+	bus->irq_domain = irq_domain_create_linear(NULL, chip->ngpio, &irq_domain_simple_ops,
+						   chipco);
 	if (!bus->irq_domain) {
 		err = -ENODEV;
 		goto err_irq_domain;
@@ -330,7 +331,8 @@ static irqreturn_t ssb_gpio_irq_extif_handler(int irq, void *dev_id)
 		return IRQ_NONE;
 
 	for_each_set_bit(gpio, &irqs, bus->gpio.ngpio)
-		generic_handle_irq(ssb_gpio_to_irq(&bus->gpio, gpio));
+		generic_handle_domain_irq_safe(bus->irq_domain, gpio);
+
 	ssb_extif_gpio_polarity(extif, irqs, val & irqs);
 
 	return IRQ_HANDLED;
@@ -345,8 +347,8 @@ static int ssb_gpio_irq_extif_domain_init(struct ssb_bus *bus)
 	if (bus->bustype != SSB_BUSTYPE_SSB)
 		return 0;
 
-	bus->irq_domain = irq_domain_add_linear(NULL, chip->ngpio,
-						&irq_domain_simple_ops, extif);
+	bus->irq_domain = irq_domain_create_linear(NULL, chip->ngpio, &irq_domain_simple_ops,
+						   extif);
 	if (!bus->irq_domain) {
 		err = -ENODEV;
 		goto err_irq_domain;

@@ -120,7 +120,7 @@ You can tell you are in a softirq (or tasklet) using the
 .. warning::
 
     Beware that this will return a false positive if a
-    :ref:`botton half lock <local_bh_disable>` is held.
+    :ref:`bottom half lock <local_bh_disable>` is held.
 
 Some Basic Rules
 ================
@@ -587,7 +587,7 @@ Defined in ``include/linux/export.h``
 
 Similar to :c:func:`EXPORT_SYMBOL()` except that the symbols
 exported by :c:func:`EXPORT_SYMBOL_GPL()` can only be seen by
-modules with a :c:func:`MODULE_LICENSE()` that specifies a GPL
+modules with a :c:func:`MODULE_LICENSE()` that specifies a GPLv2
 compatible license. It implies that the function is considered an
 internal implementation issue, and not really an interface. Some
 maintainers and developers may however require EXPORT_SYMBOL_GPL()
@@ -755,8 +755,7 @@ make a neat patch, there's administrative work to be done:
    it implies a more-than-passing commitment to some part of the code.
 
 -  Finally, don't forget to read
-   ``Documentation/process/submitting-patches.rst`` and possibly
-   ``Documentation/process/submitting-drivers.rst``.
+   ``Documentation/process/submitting-patches.rst``
 
 Kernel Cantrips
 ===============

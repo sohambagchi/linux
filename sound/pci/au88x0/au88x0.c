@@ -10,7 +10,7 @@
  *   Thanks to the ALSA developers, they helped a lot working out
  * the ALSA part.
  *   Thanks also to Sourceforge for maintaining the old binary drivers,
- * and the forum, where developers could comunicate.
+ * and the forum, where developers could communicate.
  *
  * Now at least i can play Legacy DOOM with MIDI music :-)
  */
@@ -160,12 +160,11 @@ snd_vortex_create(struct snd_card *card, struct pci_dev *pci)
 	// (1) PCI resource allocation
 	// Get MMIO area
 	//
-	err = pcim_iomap_regions(pci, 1 << 0, CARD_NAME_SHORT);
-	if (err)
-		return err;
+	chip->mmio = pcim_iomap_region(pci, 0, KBUILD_MODNAME);
+	if (IS_ERR(chip->mmio))
+		return PTR_ERR(chip->mmio);
 
 	chip->io = pci_resource_start(pci, 0);
-	chip->mmio = pcim_iomap_table(pci)[0];
 
 	/* Init audio core.
 	 * This must be done before we do request_irq otherwise we can get spurious

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause-Clear
 /*
  * Copyright (c) 2018-2019 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include "dp_rx.h"
@@ -250,7 +250,7 @@ const struct ce_attr ath11k_host_ce_config_qcn9074[] = {
 
 static bool ath11k_ce_need_shadow_fix(int ce_id)
 {
-	/* only ce4 needs shadow workaroud*/
+	/* only ce4 needs shadow workaround */
 	if (ce_id == 4)
 		return true;
 	return false;
@@ -393,11 +393,10 @@ static int ath11k_ce_completed_recv_next(struct ath11k_ce_pipe *pipe,
 		goto err;
 	}
 
+	/* Make sure descriptor is read after the head pointer. */
+	dma_rmb();
+
 	*nbytes = ath11k_hal_ce_dst_status_get_length(desc);
-	if (*nbytes == 0) {
-		ret = -EIO;
-		goto err;
-	}
 
 	*skb = pipe->dest_ring->skb[sw_index];
 	pipe->dest_ring->skb[sw_index] = NULL;
@@ -430,8 +429,8 @@ static void ath11k_ce_recv_process_cb(struct ath11k_ce_pipe *pipe)
 		dma_unmap_single(ab->dev, ATH11K_SKB_RXCB(skb)->paddr,
 				 max_nbytes, DMA_FROM_DEVICE);
 
-		if (unlikely(max_nbytes < nbytes)) {
-			ath11k_warn(ab, "rxed more than expected (nbytes %d, max %d)",
+		if (unlikely(max_nbytes < nbytes || nbytes == 0)) {
+			ath11k_warn(ab, "unexpected rx length (nbytes %d, max %d)",
 				    nbytes, max_nbytes);
 			dev_kfree_skb_any(skb);
 			continue;
@@ -442,7 +441,7 @@ static void ath11k_ce_recv_process_cb(struct ath11k_ce_pipe *pipe)
 	}
 
 	while ((skb = __skb_dequeue(&list))) {
-		ath11k_dbg(ab, ATH11K_DBG_AHB, "rx ce pipe %d len %d\n",
+		ath11k_dbg(ab, ATH11K_DBG_CE, "rx ce pipe %d len %d\n",
 			   pipe->pipe_num, skb->len);
 		pipe->recv_cb(ab, skb);
 	}
@@ -520,7 +519,7 @@ static void ath11k_ce_tx_process_cb(struct ath11k_ce_pipe *pipe)
 	}
 
 	while ((skb = __skb_dequeue(&list))) {
-		ath11k_dbg(ab, ATH11K_DBG_AHB, "tx ce pipe %d len %d\n",
+		ath11k_dbg(ab, ATH11K_DBG_CE, "tx ce pipe %d len %d\n",
 			   pipe->pipe_num, skb->len);
 		pipe->send_cb(ab, skb);
 	}
@@ -908,7 +907,7 @@ EXPORT_SYMBOL(ath11k_ce_rx_post_buf);
 
 void ath11k_ce_rx_replenish_retry(struct timer_list *t)
 {
-	struct ath11k_base *ab = from_timer(ab, t, rx_replenish_retry);
+	struct ath11k_base *ab = timer_container_of(ab, t, rx_replenish_retry);
 
 	ath11k_ce_rx_post_buf(ab);
 }
@@ -1042,7 +1041,7 @@ int ath11k_ce_alloc_pipes(struct ath11k_base *ab)
 
 		ret = ath11k_ce_alloc_pipe(ab, i);
 		if (ret) {
-			/* Free any parial successful allocation */
+			/* Free any partial successful allocation */
 			ath11k_ce_free_pipes(ab);
 			return ret;
 		}

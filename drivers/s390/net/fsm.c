@@ -9,7 +9,7 @@
 #include <linux/slab.h>
 #include <linux/timer.h>
 
-MODULE_AUTHOR("(C) 2000 IBM Corp. by Fritz Elfert (felfert@millenux.com)");
+MODULE_AUTHOR("(C) 2000 IBM Corp. by Fritz Elfert <felfert@millenux.com>");
 MODULE_DESCRIPTION("Finite state machine helper functions");
 MODULE_LICENSE("GPL");
 
@@ -28,7 +28,7 @@ init_fsm(char *name, const char **state_names, const char **event_names, int nr_
 			"fsm(%s): init_fsm: Couldn't alloc instance\n", name);
 		return NULL;
 	}
-	strlcpy(this->name, name, sizeof(this->name));
+	strscpy(this->name, name, sizeof(this->name));
 	init_waitqueue_head(&this->wait_q);
 
 	f = kzalloc(sizeof(fsm), order);
@@ -132,7 +132,7 @@ fsm_getstate_str(fsm_instance *fi)
 static void
 fsm_expire_timer(struct timer_list *t)
 {
-	fsm_timer *this = from_timer(this, t, tl);
+	fsm_timer *this = timer_container_of(this, t, tl);
 #if FSM_TIMER_DEBUG
 	printk(KERN_DEBUG "fsm(%s): Timer %p expired\n",
 	       this->fi->name, this);
@@ -158,7 +158,7 @@ fsm_deltimer(fsm_timer *this)
 	printk(KERN_DEBUG "fsm(%s): Delete timer %p\n", this->fi->name,
 		this);
 #endif
-	del_timer(&this->tl);
+	timer_delete(&this->tl);
 }
 
 int
@@ -188,7 +188,7 @@ fsm_modtimer(fsm_timer *this, int millisec, int event, void *arg)
 		this->fi->name, this, millisec);
 #endif
 
-	del_timer(&this->tl);
+	timer_delete(&this->tl);
 	timer_setup(&this->tl, fsm_expire_timer, 0);
 	this->expire_event = event;
 	this->event_arg = arg;

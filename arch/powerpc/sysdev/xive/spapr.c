@@ -7,6 +7,7 @@
 
 #include <linux/types.h>
 #include <linux/irq.h>
+#include <linux/seq_file.h>
 #include <linux/smp.h>
 #include <linux/interrupt.h>
 #include <linux/init.h>
@@ -439,6 +440,7 @@ static int xive_spapr_populate_irq_data(u32 hw_irq, struct xive_irq_data *data)
 
 	data->trig_mmio = ioremap(data->trig_page, 1u << data->esb_shift);
 	if (!data->trig_mmio) {
+		iounmap(data->eoi_mmio);
 		pr_err("Failed to map trigger page for irq 0x%x\n", hw_irq);
 		return -ENOMEM;
 	}
@@ -718,6 +720,7 @@ static bool __init xive_get_max_prio(u8 *max_prio)
 	}
 
 	reg = of_get_property(rootdn, "ibm,plat-res-int-priorities", &len);
+	of_node_put(rootdn);
 	if (!reg) {
 		pr_err("Failed to read 'ibm,plat-res-int-priorities' property\n");
 		return false;
@@ -812,7 +815,6 @@ bool __init xive_spapr_init(void)
 	struct device_node *np;
 	struct resource r;
 	void __iomem *tima;
-	struct property *prop;
 	u8 max_prio;
 	u32 val;
 	u32 len;
@@ -864,7 +866,7 @@ bool __init xive_spapr_init(void)
 	}
 
 	/* Iterate the EQ sizes and pick one */
-	of_property_for_each_u32(np, "ibm,xive-eq-sizes", prop, reg, val) {
+	of_property_for_each_u32(np, "ibm,xive-eq-sizes", val) {
 		xive_queue_shift = val;
 		if (val == PAGE_SHIFT)
 			break;

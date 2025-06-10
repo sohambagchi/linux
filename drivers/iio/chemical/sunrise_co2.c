@@ -373,7 +373,7 @@ static const struct iio_chan_spec_ext_info sunrise_concentration_ext_info[] = {
 		.read = iio_enum_available_read,
 		.private = (uintptr_t)&sunrise_error_statuses_enum,
 	},
-	{}
+	{ }
 };
 
 static const struct iio_chan_spec sunrise_channels[] = {
@@ -519,7 +519,7 @@ static int sunrise_probe(struct i2c_client *client)
 
 static const struct of_device_id sunrise_of_match[] = {
 	{ .compatible = "senseair,sunrise-006-0-0007" },
-	{}
+	{ }
 };
 MODULE_DEVICE_TABLE(of, sunrise_of_match);
 
@@ -528,7 +528,7 @@ static struct i2c_driver sunrise_driver = {
 		.name = DRIVER_NAME,
 		.of_match_table = sunrise_of_match,
 	},
-	.probe_new = sunrise_probe,
+	.probe = sunrise_probe,
 };
 module_i2c_driver(sunrise_driver);
 

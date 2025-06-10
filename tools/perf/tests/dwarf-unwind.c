@@ -15,7 +15,6 @@
 #include "symbol.h"
 #include "thread.h"
 #include "callchain.h"
-#include "util/synthetic-events.h"
 
 /* For bsearch. We try to unwind functions in shared object. */
 #include <stdlib.h>
@@ -37,24 +36,6 @@
 #define NO_TAIL_CALL_BARRIER __asm__ __volatile__("" : : : "memory");
 #endif
 
-static int mmap_handler(struct perf_tool *tool __maybe_unused,
-			union perf_event *event,
-			struct perf_sample *sample,
-			struct machine *machine)
-{
-	return machine__process_mmap2_event(machine, event, sample);
-}
-
-static int init_live_machine(struct machine *machine)
-{
-	union perf_event event;
-	pid_t pid = getpid();
-
-	memset(&event, 0, sizeof(event));
-	return perf_event__synthesize_mmap_events(NULL, &event, pid, pid,
-						  mmap_handler, machine, true);
-}
-
 /*
  * We need to keep these functions global, despite the
  * fact that they are used only locally in this object,
@@ -67,6 +48,7 @@ int test_dwarf_unwind__compare(void *p1, void *p2);
 int test_dwarf_unwind__krava_3(struct thread *thread);
 int test_dwarf_unwind__krava_2(struct thread *thread);
 int test_dwarf_unwind__krava_1(struct thread *thread);
+int test__dwarf_unwind(struct test_suite *test, int subtest);
 
 #define MAX_STACK 8
 
@@ -114,8 +96,7 @@ NO_TAIL_CALL_ATTRIBUTE noinline int test_dwarf_unwind__thread(struct thread *thr
 	unsigned long cnt = 0;
 	int err = -1;
 
-	memset(&sample, 0, sizeof(sample));
-
+	perf_sample__init(&sample, /*all=*/true);
 	if (test__arch_unwind_sample(&sample, thread)) {
 		pr_debug("failed to get unwind sample\n");
 		goto out;
@@ -133,7 +114,8 @@ NO_TAIL_CALL_ATTRIBUTE noinline int test_dwarf_unwind__thread(struct thread *thr
 
  out:
 	zfree(&sample.user_stack.data);
-	zfree(&sample.user_regs.regs);
+	zfree(&sample.user_regs->regs);
+	perf_sample__exit(&sample);
 	return err;
 }
 
@@ -195,14 +177,18 @@ NO_TAIL_CALL_ATTRIBUTE noinline int test_dwarf_unwind__krava_1(struct thread *th
 	return ret;
 }
 
-static int test__dwarf_unwind(struct test_suite *test __maybe_unused,
-			      int subtest __maybe_unused)
+noinline int test__dwarf_unwind(struct test_suite *test __maybe_unused,
+				int subtest __maybe_unused)
 {
 	struct machine *machine;
 	struct thread *thread;
 	int err = -1;
+	pid_t pid = getpid();
 
-	machine = machine__new_host();
+	callchain_param.record_mode = CALLCHAIN_DWARF;
+	dwarf_callchain_users = true;
+
+	machine = machine__new_live(/*kernel_maps=*/true, pid);
 	if (!machine) {
 		pr_err("Could not get machine\n");
 		return -1;
@@ -213,18 +199,10 @@ static int test__dwarf_unwind(struct test_suite *test __maybe_unused,
 		return -1;
 	}
 
-	callchain_param.record_mode = CALLCHAIN_DWARF;
-	dwarf_callchain_users = true;
-
-	if (init_live_machine(machine)) {
-		pr_err("Could not init machine\n");
-		goto out;
-	}
-
 	if (verbose > 1)
 		machine__fprintf(machine, stderr);
 
-	thread = machine__find_thread(machine, getpid(), getpid());
+	thread = machine__find_thread(machine, pid, pid);
 	if (!thread) {
 		pr_err("Could not get thread\n");
 		goto out;
@@ -234,7 +212,6 @@ static int test__dwarf_unwind(struct test_suite *test __maybe_unused,
 	thread__put(thread);
 
  out:
-	machine__delete_threads(machine);
 	machine__delete(machine);
 	return err;
 }

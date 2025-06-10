@@ -9,6 +9,7 @@
 #include <linux/filter.h>
 #include <linux/tracepoint.h>
 #include <linux/bpf.h>
+#include <net/xdp.h>
 
 #define __XDP_ACT_MAP(FN)	\
 	FN(ABORTED)		\
@@ -378,30 +379,21 @@ TRACE_EVENT(mem_connect,
 	)
 );
 
-TRACE_EVENT(mem_return_failed,
+TRACE_EVENT(bpf_xdp_link_attach_failed,
 
-	TP_PROTO(const struct xdp_mem_info *mem,
-		 const struct page *page),
+	TP_PROTO(const char *msg),
 
-	TP_ARGS(mem, page),
+	TP_ARGS(msg),
 
 	TP_STRUCT__entry(
-		__field(const struct page *,	page)
-		__field(u32,		mem_id)
-		__field(u32,		mem_type)
+		__string(msg, msg)
 	),
 
 	TP_fast_assign(
-		__entry->page		= page;
-		__entry->mem_id		= mem->id;
-		__entry->mem_type	= mem->type;
+		__assign_str(msg);
 	),
 
-	TP_printk("mem_id=%d mem_type=%s page=%p",
-		  __entry->mem_id,
-		  __print_symbolic(__entry->mem_type, __MEM_TYPE_SYM_TAB),
-		  __entry->page
-	)
+	TP_printk("errmsg=%s", __get_str(msg))
 );
 
 #endif /* _TRACE_XDP_H */

@@ -146,6 +146,8 @@ rio_probe1 (struct pci_dev *pdev, const struct pci_device_id *ent)
 	np->ioaddr = ioaddr;
 	np->chip_id = chip_idx;
 	np->pdev = pdev;
+
+	spin_lock_init(&np->stats_lock);
 	spin_lock_init (&np->tx_lock);
 	spin_lock_init (&np->rx_lock);
 
@@ -352,7 +354,7 @@ parse_eeprom (struct net_device *dev)
 	eth_hw_addr_set(dev, psrom->mac_addr);
 
 	if (np->chip_id == CHIP_IP1000A) {
-		np->led_mode = psrom->led_mode;
+		np->led_mode = le16_to_cpu(psrom->led_mode);
 		return 0;
 	}
 
@@ -565,8 +567,7 @@ static void rio_hw_init(struct net_device *dev)
 	 * too. However, it doesn't work on IP1000A so we use 16-bit access.
 	 */
 	for (i = 0; i < 3; i++)
-		dw16(StationAddr0 + 2 * i,
-		     cpu_to_le16(((const u16 *)dev->dev_addr)[i]));
+		dw16(StationAddr0 + 2 * i, get_unaligned_le16(&dev->dev_addr[2 * i]));
 
 	set_multicast (dev);
 	if (np->coalesce) {
@@ -649,7 +650,7 @@ static int rio_open(struct net_device *dev)
 static void
 rio_timer (struct timer_list *t)
 {
-	struct netdev_private *np = from_timer(np, t, timer);
+	struct netdev_private *np = timer_container_of(np, t, timer);
 	struct net_device *dev = pci_get_drvdata(np->pdev);
 	unsigned int entry;
 	int next_tick = 1*HZ;
@@ -814,7 +815,6 @@ rio_free_tx (struct net_device *dev, int irq)
 {
 	struct netdev_private *np = netdev_priv(dev);
 	int entry = np->old_tx % TX_RING_SIZE;
-	int tx_use = 0;
 	unsigned long flag = 0;
 
 	if (irq)
@@ -839,7 +839,6 @@ rio_free_tx (struct net_device *dev, int irq)
 
 		np->tx_skbuff[entry] = NULL;
 		entry = (entry + 1) % TX_RING_SIZE;
-		tx_use++;
 	}
 	if (irq)
 		spin_unlock(&np->tx_lock);
@@ -868,7 +867,6 @@ tx_error (struct net_device *dev, int tx_status)
 	frame_id = (tx_status & 0xffff0000);
 	printk (KERN_ERR "%s: Transmit error, TxStatus %4.4x, FrameId %d.\n",
 		dev->name, tx_status, frame_id);
-	dev->stats.tx_errors++;
 	/* Ttransmit Underrun */
 	if (tx_status & 0x10) {
 		dev->stats.tx_fifo_errors++;
@@ -905,9 +903,15 @@ tx_error (struct net_device *dev, int tx_status)
 		rio_set_led_mode(dev);
 		/* Let TxStartThresh stay default value */
 	}
+
+	spin_lock(&np->stats_lock);
 	/* Maximum Collisions */
 	if (tx_status & 0x08)
 		dev->stats.collisions++;
+
+	dev->stats.tx_errors++;
+	spin_unlock(&np->stats_lock);
+
 	/* Restart the Tx */
 	dw32(MACCtrl, dr16(MACCtrl) | TxEnable);
 }
@@ -1076,7 +1080,9 @@ get_stats (struct net_device *dev)
 	int i;
 #endif
 	unsigned int stat_reg;
+	unsigned long flags;
 
+	spin_lock_irqsave(&np->stats_lock, flags);
 	/* All statistics registers need to be acknowledged,
 	   else statistic overflow could cause problems */
 
@@ -1126,6 +1132,9 @@ get_stats (struct net_device *dev)
 	dr16(TCPCheckSumErrors);
 	dr16(UDPCheckSumErrors);
 	dr16(IPCheckSumErrors);
+
+	spin_unlock_irqrestore(&np->stats_lock, flags);
+
 	return &dev->stats;
 }
 
@@ -1235,8 +1244,8 @@ static void rio_get_drvinfo(struct net_device *dev, struct ethtool_drvinfo *info
 {
 	struct netdev_private *np = netdev_priv(dev);
 
-	strlcpy(info->driver, "dl2k", sizeof(info->driver));
-	strlcpy(info->bus_info, pci_name(np->pdev), sizeof(info->bus_info));
+	strscpy(info->driver, "dl2k", sizeof(info->driver));
+	strscpy(info->bus_info, pci_name(np->pdev), sizeof(info->bus_info));
 }
 
 static int rio_get_link_ksettings(struct net_device *dev,
@@ -1781,7 +1790,7 @@ rio_close (struct net_device *dev)
 	rio_hw_stop(dev);
 
 	free_irq(pdev->irq, dev);
-	del_timer_sync (&np->timer);
+	timer_delete_sync(&np->timer);
 
 	free_list(dev);
 
@@ -1821,7 +1830,7 @@ static int rio_suspend(struct device *device)
 		return 0;
 
 	netif_device_detach(dev);
-	del_timer_sync(&np->timer);
+	timer_delete_sync(&np->timer);
 	rio_hw_stop(dev);
 
 	return 0;
@@ -1845,7 +1854,7 @@ static int rio_resume(struct device *device)
 	return 0;
 }
 
-static SIMPLE_DEV_PM_OPS(rio_pm_ops, rio_suspend, rio_resume);
+static DEFINE_SIMPLE_DEV_PM_OPS(rio_pm_ops, rio_suspend, rio_resume);
 #define RIO_PM_OPS    (&rio_pm_ops)
 
 #else

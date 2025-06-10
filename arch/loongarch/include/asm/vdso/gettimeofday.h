@@ -25,7 +25,7 @@ static __always_inline long gettimeofday_fallback(
 
 	asm volatile(
 	"       syscall 0\n"
-	: "+r" (ret)
+	: "=r" (ret)
 	: "r" (nr), "r" (tv), "r" (tz)
 	: "$t0", "$t1", "$t2", "$t3", "$t4", "$t5", "$t6", "$t7",
 	  "$t8", "memory");
@@ -44,7 +44,7 @@ static __always_inline long clock_gettime_fallback(
 
 	asm volatile(
 	"       syscall 0\n"
-	: "+r" (ret)
+	: "=r" (ret)
 	: "r" (nr), "r" (clkid), "r" (ts)
 	: "$t0", "$t1", "$t2", "$t3", "$t4", "$t5", "$t6", "$t7",
 	  "$t8", "memory");
@@ -63,7 +63,7 @@ static __always_inline int clock_getres_fallback(
 
 	asm volatile(
 	"       syscall 0\n"
-	: "+r" (ret)
+	: "=r" (ret)
 	: "r" (nr), "r" (clkid), "r" (ts)
 	: "$t0", "$t1", "$t2", "$t3", "$t4", "$t5", "$t6", "$t7",
 	  "$t8", "memory");
@@ -72,7 +72,7 @@ static __always_inline int clock_getres_fallback(
 }
 
 static __always_inline u64 __arch_get_hw_counter(s32 clock_mode,
-						 const struct vdso_data *vd)
+						 const struct vdso_time_data *vd)
 {
 	uint64_t count;
 
@@ -88,11 +88,6 @@ static inline bool loongarch_vdso_hres_capable(void)
 	return true;
 }
 #define __arch_vdso_hres_capable loongarch_vdso_hres_capable
-
-static __always_inline const struct vdso_data *__arch_get_vdso_data(void)
-{
-	return get_vdso_data();
-}
 
 #endif /* !__ASSEMBLY__ */
 

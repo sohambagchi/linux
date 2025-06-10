@@ -16,7 +16,7 @@
 #include <linux/string.h>
 #include <linux/module.h>
 #include <net/mac80211.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 #include <linux/sysfs.h>
 
 #include "mac.h"
@@ -247,6 +247,7 @@ error:
 		for (i = 0; i < RX_URBS_COUNT; i++)
 			free_rx_urb(urbs[i]);
 	}
+	kfree(urbs);
 	return r;
 }
 
@@ -407,7 +408,7 @@ void plfxlc_usb_init(struct plfxlc_usb *usb, struct ieee80211_hw *hw,
 
 void plfxlc_usb_release(struct plfxlc_usb *usb)
 {
-	plfxlc_op_stop(plfxlc_usb_to_hw(usb));
+	plfxlc_op_stop(plfxlc_usb_to_hw(usb), false);
 	plfxlc_usb_disable_tx(usb);
 	plfxlc_usb_disable_rx(usb);
 	usb_set_intfdata(usb->intf, NULL);
@@ -492,15 +493,20 @@ int plfxlc_usb_wreq_async(struct plfxlc_usb *usb, const u8 *buffer,
 			  void *context)
 {
 	struct usb_device *udev = interface_to_usbdev(usb->ez_usb);
-	struct urb *urb = usb_alloc_urb(0, GFP_ATOMIC);
+	struct urb *urb;
 	int r;
 
+	urb = usb_alloc_urb(0, GFP_ATOMIC);
+	if (!urb)
+		return -ENOMEM;
 	usb_fill_bulk_urb(urb, udev, usb_sndbulkpipe(udev, EP_DATA_OUT),
 			  (void *)buffer, buffer_len, complete_fn, context);
 
 	r = usb_submit_urb(urb, GFP_ATOMIC);
-	if (r)
+	if (r) {
+		usb_free_urb(urb);
 		dev_err(&udev->dev, "Async write submit failed (%d)\n", r);
+	}
 
 	return r;
 }
@@ -542,7 +548,7 @@ error:
 
 static void slif_data_plane_sap_timer_callb(struct timer_list *t)
 {
-	struct plfxlc_usb *usb = from_timer(usb, t, tx.tx_retry_timer);
+	struct plfxlc_usb *usb = timer_container_of(usb, t, tx.tx_retry_timer);
 
 	plfxlc_send_packet_from_data_queue(usb);
 	timer_setup(&usb->tx.tx_retry_timer,
@@ -552,7 +558,7 @@ static void slif_data_plane_sap_timer_callb(struct timer_list *t)
 
 static void sta_queue_cleanup_timer_callb(struct timer_list *t)
 {
-	struct plfxlc_usb *usb = from_timer(usb, t, sta_queue_cleanup);
+	struct plfxlc_usb *usb = timer_container_of(usb, t, sta_queue_cleanup);
 	struct plfxlc_usb_tx *tx = &usb->tx;
 	int sidx;
 
@@ -562,7 +568,7 @@ static void sta_queue_cleanup_timer_callb(struct timer_list *t)
 		if (tx->station[sidx].flag & STATION_HEARTBEAT_FLAG) {
 			tx->station[sidx].flag ^= STATION_HEARTBEAT_FLAG;
 		} else {
-			memset(tx->station[sidx].mac, 0, ETH_ALEN);
+			eth_zero_addr(tx->station[sidx].mac);
 			tx->station[sidx].flag = 0;
 		}
 	}
@@ -710,8 +716,8 @@ static void disconnect(struct usb_interface *intf)
 	mac = plfxlc_hw_mac(hw);
 	usb = &mac->chip.usb;
 
-	del_timer_sync(&usb->tx.tx_retry_timer);
-	del_timer_sync(&usb->sta_queue_cleanup);
+	timer_delete_sync(&usb->tx.tx_retry_timer);
+	timer_delete_sync(&usb->sta_queue_cleanup);
 
 	ieee80211_unregister_hw(hw);
 
@@ -757,7 +763,7 @@ static void plfxlc_usb_resume(struct plfxlc_usb *usb)
 
 static void plfxlc_usb_stop(struct plfxlc_usb *usb)
 {
-	plfxlc_op_stop(plfxlc_usb_to_hw(usb));
+	plfxlc_op_stop(plfxlc_usb_to_hw(usb), false);
 	plfxlc_usb_disable_tx(usb);
 	plfxlc_usb_disable_rx(usb);
 

@@ -268,15 +268,19 @@ static int p50_gpio_get(struct gpio_chip *gc, unsigned int offset)
 	return ret;
 }
 
-static void p50_gpio_set(struct gpio_chip *gc, unsigned int offset, int value)
+static int p50_gpio_set(struct gpio_chip *gc, unsigned int offset, int value)
 {
 	struct p50_gpio *p50 = gpiochip_get_data(gc);
+	int ret;
 
 	mutex_lock(&p50->lock);
 
-	p50_send_mbox_cmd(p50, P50_MBOX_CMD_WRITE_GPIO, gpio_params[offset], value);
+	ret = p50_send_mbox_cmd(p50, P50_MBOX_CMD_WRITE_GPIO,
+				gpio_params[offset], value);
 
 	mutex_unlock(&p50->lock);
+
+	return ret;
 }
 
 static int p50_gpio_probe(struct platform_device *pdev)
@@ -312,7 +316,7 @@ static int p50_gpio_probe(struct platform_device *pdev)
 	p50->gc.base = -1;
 	p50->gc.get_direction = p50_gpio_get_direction;
 	p50->gc.get = p50_gpio_get;
-	p50->gc.set = p50_gpio_set;
+	p50->gc.set_rv = p50_gpio_set;
 
 
 	/* reset mbox */
@@ -370,7 +374,7 @@ err_leds:
 	return ret;
 }
 
-static int p50_gpio_remove(struct platform_device *pdev)
+static void p50_gpio_remove(struct platform_device *pdev)
 {
 	struct p50_gpio *p50 = platform_get_drvdata(pdev);
 
@@ -378,8 +382,6 @@ static int p50_gpio_remove(struct platform_device *pdev)
 	platform_device_unregister(p50->leds_pdev);
 
 	gpiod_remove_lookup_table(&p50_gpio_led_table);
-
-	return 0;
 }
 
 static struct platform_driver p50_gpio_driver = {

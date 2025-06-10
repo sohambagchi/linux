@@ -50,6 +50,9 @@
 /* Jumbo Frame Registers */
 #define B53_JUMBO_PAGE			0x40
 
+/* EAP Registers */
+#define B53_EAP_PAGE			0x42
+
 /* EEE Control Registers Page */
 #define B53_EEE_PAGE			0x92
 
@@ -138,6 +141,7 @@
 
 #define B53_RGMII_CTRL_IMP		0x60
 #define   RGMII_CTRL_ENABLE_GMII	BIT(7)
+#define   RGMII_CTRL_MII_OVERRIDE	BIT(6)
 #define   RGMII_CTRL_TIMING_SEL		BIT(2)
 #define   RGMII_CTRL_DLL_RXC		BIT(1)
 #define   RGMII_CTRL_DLL_TXC		BIT(0)
@@ -215,6 +219,13 @@
 #define   BRCM_HDR_P8_EN		BIT(0) /* Enable tagging on port 8 */
 #define   BRCM_HDR_P5_EN		BIT(1) /* Enable tagging on port 5 */
 #define   BRCM_HDR_P7_EN		BIT(2) /* Enable tagging on port 7 */
+
+/* Aging Time control register (32 bit) */
+#define B53_AGING_TIME_CONTROL		0x06
+#define B53_AGING_TIME_CONTROL_63XX	0x08
+#define  AGE_CHANGE			BIT(20)
+#define  AGE_TIME_MASK			0x7ffff
+#define  AGE_TIME_MAX			1048575
 
 /* Mirror capture control register (16 bit) */
 #define B53_MIR_CAP_CTL			0x10
@@ -478,6 +489,17 @@
 #define B53_JUMBO_MAX_SIZE_63XX		0x08
 #define   JMS_MIN_SIZE			1518
 #define   JMS_MAX_SIZE			9724
+
+/*************************************************************************
+ * EAP Page Registers
+ *************************************************************************/
+#define B53_PORT_EAP_CONF(i)		(0x20 + 8 * (i))
+#define  EAP_MODE_SHIFT			51
+#define  EAP_MODE_SHIFT_63XX		50
+#define  EAP_MODE_MASK			(0x3ull << EAP_MODE_SHIFT)
+#define  EAP_MODE_MASK_63XX		(0x3ull << EAP_MODE_SHIFT_63XX)
+#define  EAP_MODE_BASIC			0
+#define  EAP_MODE_SIMPLIFIED		3
 
 /*************************************************************************
  * EEE Configuration Page Registers

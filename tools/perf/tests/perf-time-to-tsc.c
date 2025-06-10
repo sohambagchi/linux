@@ -20,6 +20,7 @@
 #include "tsc.h"
 #include "mmap.h"
 #include "tests.h"
+#include "util/sample.h"
 
 /*
  * Except x86_64/i386 and Arm64, other archs don't support TSC in perf.  Just
@@ -62,7 +63,7 @@ static int test__tsc_is_supported(struct test_suite *test __maybe_unused,
  * This function implements a test that checks that the conversion of perf time
  * to and from TSC is consistent with the order of events.  If the test passes
  * %0 is returned, otherwise %-1 is returned.  If TSC conversion is not
- * supported then then the test passes but " (not supported)" is printed.
+ * supported then the test passes but " (not supported)" is printed.
  */
 static int test__perf_time_to_tsc(struct test_suite *test __maybe_unused, int subtest __maybe_unused)
 {
@@ -92,7 +93,7 @@ static int test__perf_time_to_tsc(struct test_suite *test __maybe_unused, int su
 	threads = thread_map__new(-1, getpid(), UINT_MAX);
 	CHECK_NOT_NULL__(threads);
 
-	cpus = perf_cpu_map__new(NULL);
+	cpus = perf_cpu_map__new_online_cpus();
 	CHECK_NOT_NULL__(cpus);
 
 	evlist = evlist__new();
@@ -100,7 +101,7 @@ static int test__perf_time_to_tsc(struct test_suite *test __maybe_unused, int su
 
 	perf_evlist__set_maps(&evlist->core, cpus, threads);
 
-	CHECK__(parse_events(evlist, "cycles:u", NULL));
+	CHECK__(parse_event(evlist, "cycles:u"));
 
 	evlist__config(evlist, &opts, NULL);
 
@@ -152,6 +153,7 @@ static int test__perf_time_to_tsc(struct test_suite *test __maybe_unused, int su
 		while ((event = perf_mmap__read_event(&md->core)) != NULL) {
 			struct perf_sample sample;
 
+			perf_sample__init(&sample, /*all=*/false);
 			if (event->header.type != PERF_RECORD_COMM ||
 			    (pid_t)event->comm.pid != getpid() ||
 			    (pid_t)event->comm.tid != getpid())
@@ -169,6 +171,7 @@ static int test__perf_time_to_tsc(struct test_suite *test __maybe_unused, int su
 			}
 next_event:
 			perf_mmap__consume(&md->core);
+			perf_sample__exit(&sample);
 		}
 		perf_mmap__read_done(&md->core);
 	}

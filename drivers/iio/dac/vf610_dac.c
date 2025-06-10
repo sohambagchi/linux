@@ -10,6 +10,7 @@
 #include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/kernel.h>
+#include <linux/mod_devicetable.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/regulator/consumer.h>
@@ -98,7 +99,7 @@ static const struct iio_enum vf610_conversion_mode = {
 static const struct iio_chan_spec_ext_info vf610_ext_info[] = {
 	IIO_ENUM("conversion_mode", IIO_SHARED_BY_DIR,
 		&vf610_conversion_mode),
-	{},
+	{ }
 };
 
 #define VF610_DAC_CHAN(_chan_type) { \
@@ -165,7 +166,7 @@ static const struct iio_info vf610_dac_iio_info = {
 
 static const struct of_device_id vf610_dac_match[] = {
 	{ .compatible = "fsl,vf610-dac", },
-	{ /* sentinel */ }
+	{ }
 };
 MODULE_DEVICE_TABLE(of, vf610_dac_match);
 
@@ -230,7 +231,7 @@ error_iio_device_register:
 	return ret;
 }
 
-static int vf610_dac_remove(struct platform_device *pdev)
+static void vf610_dac_remove(struct platform_device *pdev)
 {
 	struct iio_dev *indio_dev = platform_get_drvdata(pdev);
 	struct vf610_dac *info = iio_priv(indio_dev);
@@ -238,8 +239,6 @@ static int vf610_dac_remove(struct platform_device *pdev)
 	iio_device_unregister(indio_dev);
 	vf610_dac_exit(info);
 	clk_disable_unprepare(info->clk);
-
-	return 0;
 }
 
 static int vf610_dac_suspend(struct device *dev)

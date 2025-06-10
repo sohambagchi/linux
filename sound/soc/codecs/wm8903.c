@@ -9,7 +9,6 @@
  *
  * TODO:
  *  - TDM mode configuration.
- *  - Digital microphone support.
  */
 
 #include <linux/module.h>
@@ -1230,15 +1229,15 @@ static int wm8903_set_dai_fmt(struct snd_soc_dai *codec_dai,
 		  WM8903_AIF_LRCLK_INV | WM8903_AIF_BCLK_INV);
 
 	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
-	case SND_SOC_DAIFMT_CBS_CFS:
+	case SND_SOC_DAIFMT_CBC_CFC:
 		break;
-	case SND_SOC_DAIFMT_CBS_CFM:
+	case SND_SOC_DAIFMT_CBC_CFP:
 		aif1 |= WM8903_LRCLK_DIR;
 		break;
-	case SND_SOC_DAIFMT_CBM_CFM:
+	case SND_SOC_DAIFMT_CBP_CFP:
 		aif1 |= WM8903_LRCLK_DIR | WM8903_BCLK_DIR;
 		break;
-	case SND_SOC_DAIFMT_CBM_CFS:
+	case SND_SOC_DAIFMT_CBP_CFC:
 		aif1 |= WM8903_BCLK_DIR;
 		break;
 	default:
@@ -1826,13 +1825,15 @@ static int wm8903_gpio_direction_out(struct gpio_chip *chip,
 	return 0;
 }
 
-static void wm8903_gpio_set(struct gpio_chip *chip, unsigned offset, int value)
+static int wm8903_gpio_set(struct gpio_chip *chip, unsigned int offset,
+			   int value)
 {
 	struct wm8903_priv *wm8903 = gpiochip_get_data(chip);
 
-	regmap_update_bits(wm8903->regmap, WM8903_GPIO_CONTROL_1 + offset,
-			   WM8903_GP1_LVL_MASK,
-			   !!value << WM8903_GP1_LVL_SHIFT);
+	return regmap_update_bits(wm8903->regmap,
+				  WM8903_GPIO_CONTROL_1 + offset,
+				  WM8903_GP1_LVL_MASK,
+				  !!value << WM8903_GP1_LVL_SHIFT);
 }
 
 static const struct gpio_chip wm8903_template_chip = {
@@ -1842,7 +1843,7 @@ static const struct gpio_chip wm8903_template_chip = {
 	.direction_input	= wm8903_gpio_direction_in,
 	.get			= wm8903_gpio_get,
 	.direction_output	= wm8903_gpio_direction_out,
-	.set			= wm8903_gpio_set,
+	.set_rv			= wm8903_gpio_set,
 	.can_sleep		= 1,
 };
 
@@ -1893,7 +1894,6 @@ static const struct snd_soc_component_driver soc_component_dev_wm8903 = {
 	.idle_bias_on		= 1,
 	.use_pmdown_time	= 1,
 	.endianness		= 1,
-	.non_legacy_dai_naming	= 1,
 };
 
 static const struct regmap_config wm8903_regmap = {
@@ -1904,7 +1904,7 @@ static const struct regmap_config wm8903_regmap = {
 	.volatile_reg = wm8903_volatile_register,
 	.readable_reg = wm8903_readable_register,
 
-	.cache_type = REGCACHE_RBTREE,
+	.cache_type = REGCACHE_MAPLE,
 	.reg_defaults = wm8903_reg_defaults,
 	.num_reg_defaults = ARRAY_SIZE(wm8903_reg_defaults),
 };
@@ -2183,7 +2183,7 @@ err:
 	return ret;
 }
 
-static int wm8903_i2c_remove(struct i2c_client *client)
+static void wm8903_i2c_remove(struct i2c_client *client)
 {
 	struct wm8903_priv *wm8903 = i2c_get_clientdata(client);
 
@@ -2192,8 +2192,6 @@ static int wm8903_i2c_remove(struct i2c_client *client)
 	if (client->irq)
 		free_irq(client->irq, wm8903);
 	wm8903_free_gpio(wm8903);
-
-	return 0;
 }
 
 static const struct of_device_id wm8903_of_match[] = {
@@ -2203,7 +2201,7 @@ static const struct of_device_id wm8903_of_match[] = {
 MODULE_DEVICE_TABLE(of, wm8903_of_match);
 
 static const struct i2c_device_id wm8903_i2c_id[] = {
-	{ "wm8903", 0 },
+	{ "wm8903" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, wm8903_i2c_id);
@@ -2213,7 +2211,7 @@ static struct i2c_driver wm8903_i2c_driver = {
 		.name = "wm8903",
 		.of_match_table = wm8903_of_match,
 	},
-	.probe_new = wm8903_i2c_probe,
+	.probe =    wm8903_i2c_probe,
 	.remove =   wm8903_i2c_remove,
 	.id_table = wm8903_i2c_id,
 };

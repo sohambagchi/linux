@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+
 #include <linux/kvm_host.h>
 
 #include <asm/irq_remapping.h>
@@ -9,6 +11,7 @@
 #include "posted_intr.h"
 #include "trace.h"
 #include "vmx.h"
+#include "tdx.h"
 
 /*
  * Maintain a per-CPU list of vCPUs that need to be awakened by wakeup_handler()
@@ -29,12 +32,14 @@ static DEFINE_PER_CPU(struct list_head, wakeup_vcpus_on_cpu);
  */
 static DEFINE_PER_CPU(raw_spinlock_t, wakeup_vcpus_on_cpu_lock);
 
-static inline struct pi_desc *vcpu_to_pi_desc(struct kvm_vcpu *vcpu)
+#define PI_LOCK_SCHED_OUT SINGLE_DEPTH_NESTING
+
+static struct pi_desc *vcpu_to_pi_desc(struct kvm_vcpu *vcpu)
 {
-	return &(to_vmx(vcpu)->pi_desc);
+	return &(to_vt(vcpu)->pi_desc);
 }
 
-static int pi_try_set_control(struct pi_desc *pi_desc, u64 old, u64 new)
+static int pi_try_set_control(struct pi_desc *pi_desc, u64 *pold, u64 new)
 {
 	/*
 	 * PID.ON can be set at any time by a different vCPU or by hardware,
@@ -42,7 +47,7 @@ static int pi_try_set_control(struct pi_desc *pi_desc, u64 old, u64 new)
 	 * update must be retried with a fresh snapshot an ON change causes
 	 * the cmpxchg to fail.
 	 */
-	if (cmpxchg64(&pi_desc->control, old, new) != old)
+	if (!try_cmpxchg64(&pi_desc->control, pold, new))
 		return -EBUSY;
 
 	return 0;
@@ -51,7 +56,7 @@ static int pi_try_set_control(struct pi_desc *pi_desc, u64 old, u64 new)
 void vmx_vcpu_pi_load(struct kvm_vcpu *vcpu, int cpu)
 {
 	struct pi_desc *pi_desc = vcpu_to_pi_desc(vcpu);
-	struct vcpu_vmx *vmx = to_vmx(vcpu);
+	struct vcpu_vt *vt = to_vt(vcpu);
 	struct pi_desc old, new;
 	unsigned long flags;
 	unsigned int dest;
@@ -87,31 +92,43 @@ void vmx_vcpu_pi_load(struct kvm_vcpu *vcpu, int cpu)
 	 * current pCPU if the task was migrated.
 	 */
 	if (pi_desc->nv == POSTED_INTR_WAKEUP_VECTOR) {
-		raw_spin_lock(&per_cpu(wakeup_vcpus_on_cpu_lock, vcpu->cpu));
-		list_del(&vmx->pi_wakeup_list);
-		raw_spin_unlock(&per_cpu(wakeup_vcpus_on_cpu_lock, vcpu->cpu));
+		raw_spinlock_t *spinlock = &per_cpu(wakeup_vcpus_on_cpu_lock, vcpu->cpu);
+
+		/*
+		 * In addition to taking the wakeup lock for the regular/IRQ
+		 * context, tell lockdep it is being taken for the "sched out"
+		 * context as well.  vCPU loads happens in task context, and
+		 * this is taking the lock of the *previous* CPU, i.e. can race
+		 * with both the scheduler and the wakeup handler.
+		 */
+		raw_spin_lock(spinlock);
+		spin_acquire(&spinlock->dep_map, PI_LOCK_SCHED_OUT, 0, _RET_IP_);
+		list_del(&vt->pi_wakeup_list);
+		spin_release(&spinlock->dep_map, _RET_IP_);
+		raw_spin_unlock(spinlock);
 	}
 
 	dest = cpu_physical_id(cpu);
 	if (!x2apic_mode)
 		dest = (dest << 8) & 0xFF00;
 
+	old.control = READ_ONCE(pi_desc->control);
 	do {
-		old.control = new.control = READ_ONCE(pi_desc->control);
+		new.control = old.control;
 
 		/*
 		 * Clear SN (as above) and refresh the destination APIC ID to
 		 * handle task migration (@cpu != vcpu->cpu).
 		 */
 		new.ndst = dest;
-		new.sn = 0;
+		__pi_clear_sn(&new);
 
 		/*
 		 * Restore the notification vector; in the blocking case, the
 		 * descriptor was modified on "put" to use the wakeup vector.
 		 */
 		new.nv = POSTED_INTR_VECTOR;
-	} while (pi_try_set_control(pi_desc, old.control, new.control));
+	} while (pi_try_set_control(pi_desc, &old.control, new.control));
 
 	local_irq_restore(flags);
 
@@ -131,9 +148,8 @@ after_clear_sn:
 
 static bool vmx_can_use_vtd_pi(struct kvm *kvm)
 {
-	return irqchip_in_kernel(kvm) && enable_apicv &&
-		kvm_arch_has_assigned_device(kvm) &&
-		irq_remapping_cap(IRQ_POSTING_CAP);
+	return irqchip_in_kernel(kvm) && kvm_arch_has_irq_bypass() &&
+	       kvm_arch_has_assigned_device(kvm);
 }
 
 /*
@@ -143,25 +159,37 @@ static bool vmx_can_use_vtd_pi(struct kvm *kvm)
 static void pi_enable_wakeup_handler(struct kvm_vcpu *vcpu)
 {
 	struct pi_desc *pi_desc = vcpu_to_pi_desc(vcpu);
-	struct vcpu_vmx *vmx = to_vmx(vcpu);
+	struct vcpu_vt *vt = to_vt(vcpu);
 	struct pi_desc old, new;
-	unsigned long flags;
 
-	local_irq_save(flags);
+	lockdep_assert_irqs_disabled();
 
-	raw_spin_lock(&per_cpu(wakeup_vcpus_on_cpu_lock, vcpu->cpu));
-	list_add_tail(&vmx->pi_wakeup_list,
+	/*
+	 * Acquire the wakeup lock using the "sched out" context to workaround
+	 * a lockdep false positive.  When this is called, schedule() holds
+	 * various per-CPU scheduler locks.  When the wakeup handler runs, it
+	 * holds this CPU's wakeup lock while calling try_to_wake_up(), which
+	 * can eventually take the aforementioned scheduler locks, which causes
+	 * lockdep to assume there is deadlock.
+	 *
+	 * Deadlock can't actually occur because IRQs are disabled for the
+	 * entirety of the sched_out critical section, i.e. the wakeup handler
+	 * can't run while the scheduler locks are held.
+	 */
+	raw_spin_lock_nested(&per_cpu(wakeup_vcpus_on_cpu_lock, vcpu->cpu),
+			     PI_LOCK_SCHED_OUT);
+	list_add_tail(&vt->pi_wakeup_list,
 		      &per_cpu(wakeup_vcpus_on_cpu, vcpu->cpu));
 	raw_spin_unlock(&per_cpu(wakeup_vcpus_on_cpu_lock, vcpu->cpu));
 
-	WARN(pi_desc->sn, "PI descriptor SN field set before blocking");
+	WARN(pi_test_sn(pi_desc), "PI descriptor SN field set before blocking");
 
+	old.control = READ_ONCE(pi_desc->control);
 	do {
-		old.control = new.control = READ_ONCE(pi_desc->control);
-
 		/* set 'NV' to 'wakeup vector' */
+		new.control = old.control;
 		new.nv = POSTED_INTR_WAKEUP_VECTOR;
-	} while (pi_try_set_control(pi_desc, old.control, new.control));
+	} while (pi_try_set_control(pi_desc, &old.control, new.control));
 
 	/*
 	 * Send a wakeup IPI to this CPU if an interrupt may have been posted
@@ -172,19 +200,33 @@ static void pi_enable_wakeup_handler(struct kvm_vcpu *vcpu)
 	 * scheduled out).
 	 */
 	if (pi_test_on(&new))
-		apic->send_IPI_self(POSTED_INTR_WAKEUP_VECTOR);
+		__apic_send_IPI_self(POSTED_INTR_WAKEUP_VECTOR);
+}
 
-	local_irq_restore(flags);
+static bool vmx_needs_pi_wakeup(struct kvm_vcpu *vcpu)
+{
+	/*
+	 * The default posted interrupt vector does nothing when
+	 * invoked outside guest mode.   Return whether a blocked vCPU
+	 * can be the target of posted interrupts, as is the case when
+	 * using either IPI virtualization or VT-d PI, so that the
+	 * notification vector is switched to the one that calls
+	 * back to the pi_wakeup_handler() function.
+	 */
+	return (vmx_can_use_ipiv(vcpu) && !is_td_vcpu(vcpu)) ||
+		vmx_can_use_vtd_pi(vcpu->kvm);
 }
 
 void vmx_vcpu_pi_put(struct kvm_vcpu *vcpu)
 {
 	struct pi_desc *pi_desc = vcpu_to_pi_desc(vcpu);
 
-	if (!vmx_can_use_vtd_pi(vcpu->kvm))
+	if (!vmx_needs_pi_wakeup(vcpu))
 		return;
 
-	if (kvm_vcpu_is_blocking(vcpu) && !vmx_interrupt_blocked(vcpu))
+	if (kvm_vcpu_is_blocking(vcpu) &&
+	    ((is_td_vcpu(vcpu) && tdx_interrupt_allowed(vcpu)) ||
+	     (!is_td_vcpu(vcpu) && !vmx_interrupt_blocked(vcpu))))
 		pi_enable_wakeup_handler(vcpu);
 
 	/*
@@ -204,13 +246,13 @@ void pi_wakeup_handler(void)
 	int cpu = smp_processor_id();
 	struct list_head *wakeup_list = &per_cpu(wakeup_vcpus_on_cpu, cpu);
 	raw_spinlock_t *spinlock = &per_cpu(wakeup_vcpus_on_cpu_lock, cpu);
-	struct vcpu_vmx *vmx;
+	struct vcpu_vt *vt;
 
 	raw_spin_lock(spinlock);
-	list_for_each_entry(vmx, wakeup_list, pi_wakeup_list) {
+	list_for_each_entry(vt, wakeup_list, pi_wakeup_list) {
 
-		if (pi_test_on(&vmx->pi_desc))
-			kvm_vcpu_wake_up(&vmx->vcpu);
+		if (pi_test_on(&vt->pi_desc))
+			kvm_vcpu_wake_up(vt_to_vcpu(vt));
 	}
 	raw_spin_unlock(spinlock);
 }
@@ -219,6 +261,14 @@ void __init pi_init_cpu(int cpu)
 {
 	INIT_LIST_HEAD(&per_cpu(wakeup_vcpus_on_cpu, cpu));
 	raw_spin_lock_init(&per_cpu(wakeup_vcpus_on_cpu_lock, cpu));
+}
+
+void pi_apicv_pre_state_restore(struct kvm_vcpu *vcpu)
+{
+	struct pi_desc *pi = vcpu_to_pi_desc(vcpu);
+
+	pi_clear_on(pi);
+	memset(pi->pir, 0, sizeof(pi->pir));
 }
 
 bool pi_has_pending_interrupt(struct kvm_vcpu *vcpu)
@@ -238,7 +288,7 @@ bool pi_has_pending_interrupt(struct kvm_vcpu *vcpu)
  */
 void vmx_pi_start_assignment(struct kvm *kvm)
 {
-	if (!irq_remapping_cap(IRQ_POSTING_CAP))
+	if (!kvm_arch_has_irq_bypass())
 		return;
 
 	kvm_make_all_cpus_request(kvm, KVM_REQ_UNBLOCK);
@@ -258,6 +308,7 @@ int vmx_pi_update_irte(struct kvm *kvm, unsigned int host_irq,
 {
 	struct kvm_kernel_irq_routing_entry *e;
 	struct kvm_irq_routing_table *irq_rt;
+	bool enable_remapped_mode = true;
 	struct kvm_lapic_irq irq;
 	struct kvm_vcpu *vcpu;
 	struct vcpu_data vcpu_info;
@@ -296,21 +347,8 @@ int vmx_pi_update_irte(struct kvm *kvm, unsigned int host_irq,
 
 		kvm_set_msi_irq(kvm, e, &irq);
 		if (!kvm_intr_is_single_vcpu(kvm, &irq, &vcpu) ||
-		    !kvm_irq_is_postable(&irq)) {
-			/*
-			 * Make sure the IRTE is in remapped mode if
-			 * we don't handle it in posted mode.
-			 */
-			ret = irq_set_vcpu_affinity(host_irq, NULL);
-			if (ret < 0) {
-				printk(KERN_INFO
-				   "failed to back to remapped mode, irq: %u\n",
-				   host_irq);
-				goto out;
-			}
-
+		    !kvm_irq_is_postable(&irq))
 			continue;
-		}
 
 		vcpu_info.pi_desc_addr = __pa(vcpu_to_pi_desc(vcpu));
 		vcpu_info.vector = irq.vector;
@@ -318,17 +356,21 @@ int vmx_pi_update_irte(struct kvm *kvm, unsigned int host_irq,
 		trace_kvm_pi_irte_update(host_irq, vcpu->vcpu_id, e->gsi,
 				vcpu_info.vector, vcpu_info.pi_desc_addr, set);
 
-		if (set)
-			ret = irq_set_vcpu_affinity(host_irq, &vcpu_info);
-		else
-			ret = irq_set_vcpu_affinity(host_irq, NULL);
+		if (!set)
+			continue;
 
+		enable_remapped_mode = false;
+
+		ret = irq_set_vcpu_affinity(host_irq, &vcpu_info);
 		if (ret < 0) {
 			printk(KERN_INFO "%s: failed to update PI IRTE\n",
 					__func__);
 			goto out;
 		}
 	}
+
+	if (enable_remapped_mode)
+		ret = irq_set_vcpu_affinity(host_irq, NULL);
 
 	ret = 0;
 out:

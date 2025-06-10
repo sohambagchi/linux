@@ -10,6 +10,7 @@
 #include <linux/mount.h>
 #include <linux/nfs_fs.h>
 #include <linux/nfs_ssc.h>
+#include <linux/splice.h>
 #include "delegation.h"
 #include "internal.h"
 #include "iostat.h"
@@ -32,7 +33,6 @@ nfs4_file_open(struct inode *inode, struct file *filp)
 	struct dentry *parent = NULL;
 	struct inode *dir;
 	unsigned openflags = filp->f_flags;
-	fmode_t f_mode;
 	struct iattr attr;
 	int err;
 
@@ -51,17 +51,14 @@ nfs4_file_open(struct inode *inode, struct file *filp)
 	if (err)
 		return err;
 
-	f_mode = filp->f_mode;
-	if ((openflags & O_ACCMODE) == 3)
-		f_mode |= flags_to_mode(openflags);
-
 	/* We can't create new files here */
 	openflags &= ~(O_CREAT|O_EXCL);
 
 	parent = dget_parent(dentry);
 	dir = d_inode(parent);
 
-	ctx = alloc_nfs_open_context(file_dentry(filp), f_mode, filp);
+	ctx = alloc_nfs_open_context(file_dentry(filp),
+				     flags_to_mode(openflags), filp);
 	err = PTR_ERR(ctx);
 	if (IS_ERR(ctx))
 		goto out;
@@ -199,8 +196,8 @@ static ssize_t nfs4_copy_file_range(struct file *file_in, loff_t pos_in,
 	ret = __nfs4_copy_file_range(file_in, pos_in, file_out, pos_out, count,
 				     flags);
 	if (ret == -EOPNOTSUPP || ret == -EXDEV)
-		ret = generic_copy_file_range(file_in, pos_in, file_out,
-					      pos_out, count, flags);
+		ret = splice_copy_file_range(file_in, pos_in, file_out,
+					     pos_out, count);
 	return ret;
 }
 
@@ -228,8 +225,14 @@ static long nfs42_fallocate(struct file *filep, int mode, loff_t offset, loff_t 
 	if (!S_ISREG(inode->i_mode))
 		return -EOPNOTSUPP;
 
-	if ((mode != 0) && (mode != (FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE)))
+	switch (mode) {
+	case 0:
+	case FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE:
+	case FALLOC_FL_ZERO_RANGE:
+		break;
+	default:
 		return -EOPNOTSUPP;
+	}
 
 	ret = inode_newsize_ok(inode, offset + len);
 	if (ret < 0)
@@ -237,6 +240,8 @@ static long nfs42_fallocate(struct file *filep, int mode, loff_t offset, loff_t 
 
 	if (mode & FALLOC_FL_PUNCH_HOLE)
 		return nfs42_proc_deallocate(filep, offset, len);
+	else if (mode & FALLOC_FL_ZERO_RANGE)
+		return nfs42_proc_zero_range(filep, offset ,len);
 	return nfs42_proc_allocate(filep, offset, len);
 }
 
@@ -340,6 +345,11 @@ static struct file *__nfs42_ssc_open(struct vfsmount *ss_mnt,
 		goto out;
 	}
 
+	if (!S_ISREG(fattr->mode)) {
+		res = ERR_PTR(-EBADF);
+		goto out;
+	}
+
 	res = ERR_PTR(-ENOMEM);
 	len = strlen(SSC_READ_NAME_BODY) + 16;
 	read_name = kzalloc(len, GFP_KERNEL);
@@ -357,11 +367,12 @@ static struct file *__nfs42_ssc_open(struct vfsmount *ss_mnt,
 				     r_ino->i_fop);
 	if (IS_ERR(filep)) {
 		res = ERR_CAST(filep);
+		iput(r_ino);
 		goto out_free_name;
 	}
 
-	ctx = alloc_nfs_open_context(filep->f_path.dentry, filep->f_mode,
-					filep);
+	ctx = alloc_nfs_open_context(filep->f_path.dentry,
+				     flags_to_mode(filep->f_flags), filep);
 	if (IS_ERR(ctx)) {
 		res = ERR_CAST(ctx);
 		goto out_filep;
@@ -436,7 +447,7 @@ void nfs42_ssc_unregister_ops(void)
 }
 #endif /* CONFIG_NFS_V4_2 */
 
-static int nfs4_setlease(struct file *file, long arg, struct file_lock **lease,
+static int nfs4_setlease(struct file *file, int arg, struct file_lease **lease,
 			 void **priv)
 {
 	return nfs4_proc_setlease(file, arg, lease, priv);
@@ -452,7 +463,7 @@ const struct file_operations nfs4_file_operations = {
 	.fsync		= nfs_file_fsync,
 	.lock		= nfs_lock,
 	.flock		= nfs_flock,
-	.splice_read	= generic_file_splice_read,
+	.splice_read	= nfs_file_splice_read,
 	.splice_write	= iter_file_splice_write,
 	.check_flags	= nfs_check_flags,
 	.setlease	= nfs4_setlease,

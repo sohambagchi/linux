@@ -8,13 +8,14 @@
  * Author: Gary R Hook <gary.hook@amd.com>
  */
 
-#include <linux/dma-mapping.h>
-#include <linux/module.h>
-#include <linux/kernel.h>
-#include <linux/interrupt.h>
-#include <crypto/scatterwalk.h>
 #include <crypto/des.h>
+#include <crypto/scatterwalk.h>
+#include <crypto/utils.h>
 #include <linux/ccp.h>
+#include <linux/dma-mapping.h>
+#include <linux/errno.h>
+#include <linux/kernel.h>
+#include <linux/module.h>
 
 #include "ccp-dev.h"
 
@@ -179,8 +180,11 @@ static int ccp_init_dm_workarea(struct ccp_dm_workarea *wa,
 
 		wa->dma.address = dma_map_single(wa->dev, wa->address, len,
 						 dir);
-		if (dma_mapping_error(wa->dev, wa->dma.address))
+		if (dma_mapping_error(wa->dev, wa->dma.address)) {
+			kfree(wa->address);
+			wa->address = NULL;
 			return -ENOMEM;
+		}
 
 		wa->dma.length = len;
 	}

@@ -19,6 +19,7 @@
 
 #include <linux/clk.h>
 #include <linux/errno.h>
+#include <linux/ethtool.h>
 #include <linux/init.h>
 #include <linux/bitfield.h>
 #include <linux/interrupt.h>
@@ -274,7 +275,7 @@ static int ctucan_set_bittiming(struct net_device *ndev)
 static int ctucan_set_data_bittiming(struct net_device *ndev)
 {
 	struct ctucan_priv *priv = netdev_priv(ndev);
-	struct can_bittiming *dbt = &priv->can.data_bittiming;
+	struct can_bittiming *dbt = &priv->can.fd.data_bittiming;
 
 	/* Note that dbt may be modified here */
 	return ctucan_set_btr(ndev, dbt, false);
@@ -289,7 +290,7 @@ static int ctucan_set_data_bittiming(struct net_device *ndev)
 static int ctucan_set_secondary_sample_point(struct net_device *ndev)
 {
 	struct ctucan_priv *priv = netdev_priv(ndev);
-	struct can_bittiming *dbt = &priv->can.data_bittiming;
+	struct can_bittiming *dbt = &priv->can.fd.data_bittiming;
 	int ssp_offset = 0;
 	u32 ssp_cfg = 0; /* No SSP by default */
 
@@ -599,7 +600,7 @@ static netdev_tx_t ctucan_start_xmit(struct sk_buff *skb, struct net_device *nde
 	bool ok;
 	unsigned long flags;
 
-	if (can_dropped_invalid_skb(ndev, skb))
+	if (can_dev_dropped_skb(ndev, skb))
 		return NETDEV_TX_OK;
 
 	if (unlikely(!CTU_CAN_FD_TXTNF(priv))) {
@@ -656,7 +657,6 @@ static void ctucan_read_rx_frame(struct ctucan_priv *priv, struct canfd_frame *c
 		cf->can_id = (idw >> 18) & CAN_SFF_MASK;
 
 	/* BRS, ESI, RTR Flags */
-	cf->flags = 0;
 	if (FIELD_GET(REG_FRAME_FORMAT_W_FDF, ffw)) {
 		if (FIELD_GET(REG_FRAME_FORMAT_W_BRS, ffw))
 			cf->flags |= CANFD_BRS;
@@ -847,7 +847,7 @@ static void ctucan_err_interrupt(struct net_device *ndev, u32 isr)
 		case CAN_STATE_ERROR_PASSIVE:
 			priv->can.can_stats.error_passive++;
 			if (skb) {
-				cf->can_id |= CAN_ERR_CRTL;
+				cf->can_id |= CAN_ERR_CRTL | CAN_ERR_CNT;
 				cf->data[1] = (bec.rxerr > 127) ?
 						CAN_ERR_CRTL_RX_PASSIVE :
 						CAN_ERR_CRTL_TX_PASSIVE;
@@ -858,7 +858,7 @@ static void ctucan_err_interrupt(struct net_device *ndev, u32 isr)
 		case CAN_STATE_ERROR_WARNING:
 			priv->can.can_stats.error_warning++;
 			if (skb) {
-				cf->can_id |= CAN_ERR_CRTL;
+				cf->can_id |= CAN_ERR_CRTL | CAN_ERR_CNT;
 				cf->data[1] |= (bec.txerr > bec.rxerr) ?
 					CAN_ERR_CRTL_TX_WARNING :
 					CAN_ERR_CRTL_RX_WARNING;
@@ -867,9 +867,12 @@ static void ctucan_err_interrupt(struct net_device *ndev, u32 isr)
 			}
 			break;
 		case CAN_STATE_ERROR_ACTIVE:
-			cf->data[1] = CAN_ERR_CRTL_ACTIVE;
-			cf->data[6] = bec.txerr;
-			cf->data[7] = bec.rxerr;
+			if (skb) {
+				cf->can_id |= CAN_ERR_CNT;
+				cf->data[1] = CAN_ERR_CRTL_ACTIVE;
+				cf->data[6] = bec.txerr;
+				cf->data[7] = bec.rxerr;
+			}
 			break;
 		default:
 			netdev_warn(ndev, "unhandled error state (%d:%s)!\n",
@@ -1087,7 +1090,7 @@ clear:
 /**
  * ctucan_interrupt() - CAN Isr
  * @irq:	irq number
- * @dev_id:	device id poniter
+ * @dev_id:	device id pointer
  *
  * This is the CTU CAN FD ISR. It checks for the type of interrupt
  * and invokes the corresponding ISR.
@@ -1300,6 +1303,10 @@ static const struct net_device_ops ctucan_netdev_ops = {
 	.ndo_change_mtu	= can_change_mtu,
 };
 
+static const struct ethtool_ops ctucan_ethtool_ops = {
+	.get_ts_info = ethtool_op_get_ts_info,
+};
+
 int ctucan_suspend(struct device *dev)
 {
 	struct net_device *ndev = dev_get_drvdata(dev);
@@ -1351,12 +1358,12 @@ int ctucan_probe_common(struct device *dev, void __iomem *addr, int irq, unsigne
 	priv->ntxbufs = ntxbufs;
 	priv->dev = dev;
 	priv->can.bittiming_const = &ctu_can_fd_bit_timing_max;
-	priv->can.data_bittiming_const = &ctu_can_fd_bit_timing_data_max;
+	priv->can.fd.data_bittiming_const = &ctu_can_fd_bit_timing_data_max;
 	priv->can.do_set_mode = ctucan_do_set_mode;
 
 	/* Needed for timing adjustment to be performed as soon as possible */
 	priv->can.do_set_bittiming = ctucan_set_bittiming;
-	priv->can.do_set_data_bittiming = ctucan_set_data_bittiming;
+	priv->can.fd.do_set_data_bittiming = ctucan_set_data_bittiming;
 
 	priv->can.do_get_berr_counter = ctucan_get_berr_counter;
 	priv->can.ctrlmode_supported = CAN_CTRLMODE_LOOPBACK
@@ -1376,6 +1383,7 @@ int ctucan_probe_common(struct device *dev, void __iomem *addr, int irq, unsigne
 		set_drvdata_fnc(dev, ndev);
 	SET_NETDEV_DEV(ndev, dev);
 	ndev->netdev_ops = &ctucan_netdev_ops;
+	ndev->ethtool_ops = &ctucan_ethtool_ops;
 
 	/* Getting the can_clk info */
 	if (!can_clk_rate) {
@@ -1418,7 +1426,7 @@ int ctucan_probe_common(struct device *dev, void __iomem *addr, int irq, unsigne
 
 	priv->can.clock.freq = can_clk_rate;
 
-	netif_napi_add(ndev, &priv->napi, ctucan_rx_poll, NAPI_POLL_WEIGHT);
+	netif_napi_add(ndev, &priv->napi, ctucan_rx_poll);
 
 	ret = register_candev(ndev);
 	if (ret) {

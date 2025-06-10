@@ -72,13 +72,10 @@ struct pt_regs {
 	/* Additional configurable registers that are used by the compiler. */
 	xtregs_opt_t xtregs_opt;
 
-	/* Make sure the areg field is 16 bytes aligned. */
-	int align[0] __attribute__ ((aligned(16)));
-
 	/* current register frame.
 	 * Note: The ESF for kernel exceptions ends after 16 registers!
 	 */
-	unsigned long areg[XCHAL_NUM_AREGS];
+	unsigned long areg[XCHAL_NUM_AREGS] __aligned(16);
 };
 
 # define arch_has_single_step()	(1)
@@ -87,7 +84,7 @@ struct pt_regs {
 # define user_mode(regs) (((regs)->ps & 0x00000020)!=0)
 # define instruction_pointer(regs) ((regs)->pc)
 # define return_pointer(regs) (MAKE_PC_FROM_RA((regs)->areg[0], \
-					       (regs)->areg[1]))
+					       (regs)->pc))
 
 # ifndef CONFIG_SMP
 #  define profile_pc(regs) instruction_pointer(regs)
@@ -105,6 +102,9 @@ static inline unsigned long regs_return_value(struct pt_regs *regs)
 {
 	return regs->areg[2];
 }
+
+int do_syscall_trace_enter(struct pt_regs *regs);
+void do_syscall_trace_leave(struct pt_regs *regs);
 
 #else	/* __ASSEMBLY__ */
 

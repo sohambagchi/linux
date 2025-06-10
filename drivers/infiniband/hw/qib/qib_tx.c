@@ -82,7 +82,6 @@ int qib_disarm_piobufs_ifneeded(struct qib_ctxtdata *rcd)
 	struct qib_devdata *dd = rcd->dd;
 	unsigned i;
 	unsigned last;
-	unsigned n = 0;
 
 	last = rcd->pio_base + rcd->piocnt;
 	/*
@@ -102,10 +101,8 @@ int qib_disarm_piobufs_ifneeded(struct qib_ctxtdata *rcd)
 	}
 	spin_lock_irq(&dd->pioavail_lock);
 	for (i = rcd->pio_base; i < last; i++) {
-		if (__test_and_clear_bit(i, dd->pio_need_disarm)) {
-			n++;
+		if (__test_and_clear_bit(i, dd->pio_need_disarm))
 			dd->f_sendctrl(rcd->ppd, QIB_SENDCTRL_DISARM_BUF(i));
-		}
 	}
 	spin_unlock_irq(&dd->pioavail_lock);
 	return 0;
@@ -551,7 +548,7 @@ void qib_hol_up(struct qib_pportdata *ppd)
  */
 void qib_hol_event(struct timer_list *t)
 {
-	struct qib_pportdata *ppd = from_timer(ppd, t, hol_timer);
+	struct qib_pportdata *ppd = timer_container_of(ppd, t, hol_timer);
 
 	/* If hardware error, etc, skip. */
 	if (!(ppd->dd->flags & QIB_INITTED))

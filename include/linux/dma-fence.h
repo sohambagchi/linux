@@ -21,6 +21,7 @@
 #include <linux/sched.h>
 #include <linux/printk.h>
 #include <linux/rcupdate.h>
+#include <linux/timekeeping.h>
 
 struct dma_fence;
 struct dma_fence_ops;
@@ -168,8 +169,8 @@ struct dma_fence_ops {
 	 * implementation know that there is another driver waiting on the
 	 * signal (ie. hw->sw case).
 	 *
-	 * This function can be called from atomic context, but not
-	 * from irq context, so normal spinlocks can be used.
+	 * This is called with irq's disabled, so only spinlocks which disable
+	 * IRQ's can be used in the code outside of this callback.
 	 *
 	 * A return value of false indicates the fence already passed,
 	 * or some failure occurred that made it impossible to enable
@@ -238,25 +239,24 @@ struct dma_fence_ops {
 	void (*release)(struct dma_fence *fence);
 
 	/**
-	 * @fence_value_str:
+	 * @set_deadline:
 	 *
-	 * Callback to fill in free-form debug info specific to this fence, like
-	 * the sequence number.
+	 * Callback to allow a fence waiter to inform the fence signaler of
+	 * an upcoming deadline, such as vblank, by which point the waiter
+	 * would prefer the fence to be signaled by.  This is intended to
+	 * give feedback to the fence signaler to aid in power management
+	 * decisions, such as boosting GPU frequency.
+	 *
+	 * This is called without &dma_fence.lock held, it can be called
+	 * multiple times and from any context.  Locking is up to the callee
+	 * if it has some state to manage.  If multiple deadlines are set,
+	 * the expectation is to track the soonest one.  If the deadline is
+	 * before the current time, it should be interpreted as an immediate
+	 * deadline.
 	 *
 	 * This callback is optional.
 	 */
-	void (*fence_value_str)(struct dma_fence *fence, char *str, int size);
-
-	/**
-	 * @timeline_value_str:
-	 *
-	 * Fills in the current value of the timeline as a string, like the
-	 * sequence number. Note that the specific fence passed to this function
-	 * should not matter, drivers should only use it to look up the
-	 * corresponding timeline structures.
-	 */
-	void (*timeline_value_str)(struct dma_fence *fence,
-				   char *str, int size);
+	void (*set_deadline)(struct dma_fence *fence, ktime_t deadline);
 };
 
 void dma_fence_init(struct dma_fence *fence, const struct dma_fence_ops *ops,
@@ -479,6 +479,21 @@ static inline bool dma_fence_is_later(struct dma_fence *f1,
 }
 
 /**
+ * dma_fence_is_later_or_same - return true if f1 is later or same as f2
+ * @f1: the first fence from the same context
+ * @f2: the second fence from the same context
+ *
+ * Returns true if f1 is chronologically later than f2 or the same fence. Both
+ * fences must be from the same context, since a seqno is not re-used across
+ * contexts.
+ */
+static inline bool dma_fence_is_later_or_same(struct dma_fence *f1,
+					      struct dma_fence *f2)
+{
+	return f1 == f2 || dma_fence_is_later(f1, f2);
+}
+
+/**
  * dma_fence_later - return the chronologically later fence
  * @f1:	the first fence from the same context
  * @f2:	the second fence from the same context
@@ -538,6 +553,12 @@ int dma_fence_get_status(struct dma_fence *fence);
  * rather than success. This must be set before signaling (so that the value
  * is visible before any waiters on the signal callback are woken). This
  * helper exists to help catching erroneous setting of #dma_fence.error.
+ *
+ * Examples of error codes which drivers should use:
+ *
+ * * %-ENODATA	 This operation produced no data, no other operation affected.
+ * * %-ECANCELED All operations from the same context have been canceled.
+ * * %-ETIME	 Operation caused a timeout and potentially device reset.
  */
 static inline void dma_fence_set_error(struct dma_fence *fence,
 				       int error)
@@ -546,6 +567,25 @@ static inline void dma_fence_set_error(struct dma_fence *fence,
 	WARN_ON(error >= 0 || error < -MAX_ERRNO);
 
 	fence->error = error;
+}
+
+/**
+ * dma_fence_timestamp - helper to get the completion timestamp of a fence
+ * @fence: fence to get the timestamp from.
+ *
+ * After a fence is signaled the timestamp is updated with the signaling time,
+ * but setting the timestamp can race with tasks waiting for the signaling. This
+ * helper busy waits for the correct timestamp to appear.
+ */
+static inline ktime_t dma_fence_timestamp(struct dma_fence *fence)
+{
+	if (WARN_ON(!test_bit(DMA_FENCE_FLAG_SIGNALED_BIT, &fence->flags)))
+		return ktime_get();
+
+	while (!test_bit(DMA_FENCE_FLAG_TIMESTAMP_BIT, &fence->flags))
+		cpu_relax();
+
+	return fence->timestamp;
 }
 
 signed long dma_fence_wait_timeout(struct dma_fence *,
@@ -583,8 +623,10 @@ static inline signed long dma_fence_wait(struct dma_fence *fence, bool intr)
 	return ret < 0 ? ret : 0;
 }
 
+void dma_fence_set_deadline(struct dma_fence *fence, ktime_t deadline);
+
 struct dma_fence *dma_fence_get_stub(void);
-struct dma_fence *dma_fence_allocate_private_stub(void);
+struct dma_fence *dma_fence_allocate_private_stub(ktime_t timestamp);
 u64 dma_fence_context_alloc(unsigned num);
 
 extern const struct dma_fence_ops dma_fence_array_ops;

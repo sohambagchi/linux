@@ -20,6 +20,7 @@
 #include <linux/irq.h>
 #include <linux/interrupt.h>
 #include <linux/platform_device.h>
+#include <linux/string_choices.h>
 
 #include <linux/mmc/host.h>
 #include <linux/mmc/mmc.h>
@@ -208,7 +209,7 @@ static void alcor_trf_block_pio(struct alcor_sdmmc_host *host, bool read)
 	len = min(host->sg_miter.length, blksize);
 
 	dev_dbg(host->dev, "PIO, %s block size: 0x%zx\n",
-		read ? "read" : "write", blksize);
+		str_read_write(read), blksize);
 
 	host->sg_miter.consumed = len;
 	host->blocks--;
@@ -1114,7 +1115,10 @@ static int alcor_pci_sdmmc_drv_probe(struct platform_device *pdev)
 	alcor_hw_init(host);
 
 	dev_set_drvdata(&pdev->dev, host);
-	mmc_add_host(mmc);
+	ret = mmc_add_host(mmc);
+	if (ret)
+		goto free_host;
+
 	return 0;
 
 free_host:
@@ -1122,7 +1126,7 @@ free_host:
 	return ret;
 }
 
-static int alcor_pci_sdmmc_drv_remove(struct platform_device *pdev)
+static void alcor_pci_sdmmc_drv_remove(struct platform_device *pdev)
 {
 	struct alcor_sdmmc_host *host = dev_get_drvdata(&pdev->dev);
 	struct mmc_host *mmc = mmc_from_priv(host);
@@ -1133,8 +1137,6 @@ static int alcor_pci_sdmmc_drv_remove(struct platform_device *pdev)
 	alcor_hw_uninit(host);
 	mmc_remove_host(mmc);
 	mmc_free_host(mmc);
-
-	return 0;
 }
 
 #ifdef CONFIG_PM_SLEEP

@@ -169,8 +169,10 @@ static int sys_clone(unsigned long clone_flags, unsigned long newsp,
 			   child_tidptr);
 }
 
+#define __STACK_SIZE (8 * 1024 * 1024)
+
 /*
- * If we clone with CLONE_SETTLS then the value in the parent should
+ * If we clone with CLONE_VM then the value in the parent should
  * be unchanged and the child should start with zero and be able to
  * set its own value.
  */
@@ -179,11 +181,19 @@ static int write_clone_read(void)
 	int parent_tid, child_tid;
 	pid_t parent, waiting;
 	int ret, status;
+	void *stack;
 
 	parent = getpid();
 	set_tpidr2(parent);
 
-	ret = sys_clone(CLONE_SETTLS, 0, &parent_tid, 0, &child_tid);
+	stack = malloc(__STACK_SIZE);
+	if (!stack) {
+		putstr("# malloc() failed\n");
+		return 0;
+	}
+
+	ret = sys_clone(CLONE_VM, (unsigned long)stack + __STACK_SIZE,
+			&parent_tid, 0, &child_tid);
 	if (ret == -1) {
 		putstr("# clone() failed\n");
 		putnum(errno);
@@ -254,9 +264,15 @@ static int write_clone_read(void)
 	putnum(++tests_run);		     \
 	putstr(" " #name "\n");
 
+#define skip_test(name)			     \
+	tests_skipped++;		     \
+	putstr("ok ");			     \
+	putnum(++tests_run);		     \
+	putstr(" # SKIP " #name "\n");
+
 int main(int argc, char **argv)
 {
-	int ret, i;
+	int ret;
 
 	putstr("TAP version 13\n");
 	putstr("1..");
@@ -283,13 +299,11 @@ int main(int argc, char **argv)
 	} else {
 		putstr("# SME support not present\n");
 
-		for (i = 0; i < EXPECTED_TESTS; i++) {
-			putstr("ok ");
-			putnum(i);
-			putstr(" skipped, TPIDR2 not supported\n");
-		}
-
-		tests_skipped += EXPECTED_TESTS;
+		skip_test(default_value);
+		skip_test(write_read);
+		skip_test(write_sleep_read);
+		skip_test(write_fork_read);
+		skip_test(write_clone_read);
 	}
 
 	print_summary();

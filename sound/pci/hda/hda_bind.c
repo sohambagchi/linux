@@ -10,7 +10,6 @@
 #include <linux/module.h>
 #include <linux/export.h>
 #include <linux/pm.h>
-#include <linux/pm_runtime.h>
 #include <sound/core.h>
 #include <sound/hda_codec.h>
 #include "hda_local.h"
@@ -19,10 +18,10 @@
 /*
  * find a matching codec id
  */
-static int hda_codec_match(struct hdac_device *dev, struct hdac_driver *drv)
+static int hda_codec_match(struct hdac_device *dev, const struct hdac_driver *drv)
 {
 	struct hda_codec *codec = container_of(dev, struct hda_codec, core);
-	struct hda_codec_driver *driver =
+	const struct hda_codec_driver *driver =
 		container_of(drv, struct hda_codec_driver, core);
 	const struct hda_device_id *list;
 	/* check probe_id instead of vendor_id if set */
@@ -45,7 +44,7 @@ static void hda_codec_unsol_event(struct hdac_device *dev, unsigned int ev)
 	struct hda_codec *codec = container_of(dev, struct hda_codec, core);
 
 	/* ignore unsol events during shutdown */
-	if (codec->bus->shutdown)
+	if (codec->card->shutdown || codec->bus->shutdown)
 		return;
 
 	/* ignore unsol events during system suspend/resume */
@@ -144,6 +143,7 @@ static int hda_codec_driver_probe(struct device *dev)
 
  error:
 	snd_hda_codec_cleanup_for_unbind(codec);
+	codec->preset = NULL;
 	return err;
 }
 
@@ -157,15 +157,16 @@ static int hda_codec_driver_remove(struct device *dev)
 		return codec->bus->core.ext_ops->hdev_detach(&codec->core);
 	}
 
-	refcount_dec(&codec->pcm_ref);
 	snd_hda_codec_disconnect_pcms(codec);
 	snd_hda_jack_tbl_disconnect(codec);
-	wait_event(codec->remove_sleep, !refcount_read(&codec->pcm_ref));
+	if (!refcount_dec_and_test(&codec->pcm_ref))
+		wait_event(codec->remove_sleep, !refcount_read(&codec->pcm_ref));
 	snd_power_sync_ref(codec->bus->card);
 
 	if (codec->patch_ops.free)
 		codec->patch_ops.free(codec);
 	snd_hda_codec_cleanup_for_unbind(codec);
+	codec->preset = NULL;
 	module_put(dev->driver->owner);
 	return 0;
 }
@@ -184,7 +185,7 @@ int __hda_codec_driver_register(struct hda_codec_driver *drv, const char *name,
 	drv->core.driver.probe = hda_codec_driver_probe;
 	drv->core.driver.remove = hda_codec_driver_remove;
 	drv->core.driver.shutdown = hda_codec_driver_shutdown;
-	drv->core.driver.pm = &hda_codec_driver_pm;
+	drv->core.driver.pm = pm_ptr(&hda_codec_driver_pm);
 	drv->core.type = HDA_DEV_LEGACY;
 	drv->core.match = hda_codec_match;
 	drv->core.unsol_event = hda_codec_unsol_event;
@@ -247,6 +248,13 @@ static void codec_bind_module(struct hda_codec *codec)
 static bool is_likely_hdmi_codec(struct hda_codec *codec)
 {
 	hda_nid_t nid;
+
+	/*
+	 * For ASoC users, if snd_hda_hdmi_codec module is denylisted and any
+	 * event causes i915 enumeration to fail, ->wcaps remains uninitialized.
+	 */
+	if (!codec->wcaps)
+		return true;
 
 	for_each_hda_codec_node(nid, codec) {
 		unsigned int wcaps = get_wcaps(codec, nid);

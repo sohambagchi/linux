@@ -17,7 +17,6 @@
 #include <linux/mfd/core.h>
 #include <linux/mfd/max8925.h>
 #include <linux/of.h>
-#include <linux/of_platform.h>
 
 static const struct resource bk_resources[] = {
 	{ 0x84, 0x84, "mode control", IORESOURCE_REG, },
@@ -469,12 +468,6 @@ static struct max8925_irq_data max8925_irqs[] = {
 	},
 };
 
-static inline struct max8925_irq_data *irq_to_max8925(struct max8925_chip *chip,
-						      int irq)
-{
-	return &max8925_irqs[irq - chip->irq_base];
-}
-
 static irqreturn_t max8925_irq(int irq, void *data)
 {
 	struct max8925_chip *chip = data;
@@ -689,8 +682,8 @@ static int max8925_irq_init(struct max8925_chip *chip, int irq,
 		return -EBUSY;
 	}
 
-	irq_domain_add_legacy(node, MAX8925_NR_IRQS, chip->irq_base, 0,
-			      &max8925_irq_domain_ops, chip);
+	irq_domain_create_legacy(of_fwnode_handle(node), MAX8925_NR_IRQS, chip->irq_base, 0,
+				 &max8925_irq_domain_ops, chip);
 
 	/* request irq handler for pmic main irq*/
 	chip->core_irq = irq;

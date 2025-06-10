@@ -17,9 +17,6 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/msi.h>
-#include <linux/of_address.h>
-#include <linux/of_irq.h>
-#include <linux/of_platform.h>
 #include <linux/of_pci.h>
 #include <linux/pci.h>
 #include <linux/platform_device.h>
@@ -363,8 +360,8 @@ static struct irq_chip mobiveil_msi_irq_chip = {
 };
 
 static struct msi_domain_info mobiveil_msi_domain_info = {
-	.flags	= (MSI_FLAG_USE_DEF_DOM_OPS | MSI_FLAG_USE_DEF_CHIP_OPS |
-		   MSI_FLAG_PCI_MSIX),
+	.flags	= MSI_FLAG_USE_DEF_DOM_OPS | MSI_FLAG_USE_DEF_CHIP_OPS |
+		  MSI_FLAG_NO_AFFINITY | MSI_FLAG_PCI_MSIX,
 	.chip	= &mobiveil_msi_irq_chip,
 };
 
@@ -381,16 +378,9 @@ static void mobiveil_compose_msi_msg(struct irq_data *data, struct msi_msg *msg)
 		(int)data->hwirq, msg->address_hi, msg->address_lo);
 }
 
-static int mobiveil_msi_set_affinity(struct irq_data *irq_data,
-				     const struct cpumask *mask, bool force)
-{
-	return -EINVAL;
-}
-
 static struct irq_chip mobiveil_msi_bottom_irq_chip = {
 	.name			= "Mobiveil MSI",
 	.irq_compose_msi_msg	= mobiveil_compose_msi_msg,
-	.irq_set_affinity	= mobiveil_msi_set_affinity,
 };
 
 static int mobiveil_irq_msi_domain_alloc(struct irq_domain *domain,
@@ -445,12 +435,12 @@ static const struct irq_domain_ops msi_domain_ops = {
 static int mobiveil_allocate_msi_domains(struct mobiveil_pcie *pcie)
 {
 	struct device *dev = &pcie->pdev->dev;
-	struct fwnode_handle *fwnode = of_node_to_fwnode(dev->of_node);
+	struct fwnode_handle *fwnode = of_fwnode_handle(dev->of_node);
 	struct mobiveil_msi *msi = &pcie->rp.msi;
 
 	mutex_init(&msi->lock);
-	msi->dev_domain = irq_domain_add_linear(NULL, msi->num_of_vectors,
-						&msi_domain_ops, pcie);
+	msi->dev_domain = irq_domain_create_linear(NULL, msi->num_of_vectors,
+						   &msi_domain_ops, pcie);
 	if (!msi->dev_domain) {
 		dev_err(dev, "failed to create IRQ domain\n");
 		return -ENOMEM;
@@ -471,12 +461,11 @@ static int mobiveil_allocate_msi_domains(struct mobiveil_pcie *pcie)
 static int mobiveil_pcie_init_irq_domain(struct mobiveil_pcie *pcie)
 {
 	struct device *dev = &pcie->pdev->dev;
-	struct device_node *node = dev->of_node;
 	struct mobiveil_root_port *rp = &pcie->rp;
 
 	/* setup INTx */
-	rp->intx_domain = irq_domain_add_linear(node, PCI_NUM_INTX,
-						&intx_domain_ops, pcie);
+	rp->intx_domain = irq_domain_create_linear(of_fwnode_handle(dev->of_node), PCI_NUM_INTX,
+						   &intx_domain_ops, pcie);
 
 	if (!rp->intx_domain) {
 		dev_err(dev, "Failed to get a INTx IRQ domain\n");
@@ -542,7 +531,7 @@ static bool mobiveil_pcie_is_bridge(struct mobiveil_pcie *pcie)
 	u32 header_type;
 
 	header_type = mobiveil_csr_readb(pcie, PCI_HEADER_TYPE);
-	header_type &= 0x7f;
+	header_type &= PCI_HEADER_TYPE_MASK;
 
 	return header_type == PCI_HEADER_TYPE_BRIDGE;
 }
